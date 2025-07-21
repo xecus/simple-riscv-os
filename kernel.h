@@ -1,43 +1,81 @@
+/**
+ * @file kernel.h  
+ * @brief Core kernel definitions and structures for RISC-V OS
+ * 
+ * このファイルは、RISC-V 32ビットアーキテクチャ用のシンプルなOSカーネルの
+ * 中核となる定数、構造体、関数宣言を定義します。
+ * 
+ * 主要な機能：
+ * - メモリ管理（仮想メモリ、ページング）
+ * - プロセス管理とコンテキストスイッチ
+ * - システムコール処理
+ * - 例外・割り込み処理
+ */
 #pragma once
 
-typedef unsigned int uint32_t;
-typedef unsigned long size_t;
-typedef unsigned char uint8_t;
-typedef uint32_t paddr_t;
-typedef uint32_t vaddr_t;
+// 基本的な型定義
+typedef unsigned int uint32_t;         // 32ビット符号なし整数
+typedef unsigned long size_t;          // サイズを表す型
+typedef unsigned char uint8_t;         // 8ビット符号なし整数  
+typedef uint32_t paddr_t;              // 物理アドレス型
+typedef uint32_t vaddr_t;              // 仮想アドレス型
 
 #define NULL ((void *)0)
 
-#define PAGE_SIZE 4096
-#define USER_BASE 0x1000000
-#define SSTATUS_SPIE (1 << 5)
-#define SCAUSE_ECALL 8
+// メモリレイアウト定数
+#define PAGE_SIZE       4096           // ページサイズ（4KB）
+#define USER_BASE       0x1000000      // ユーザー空間開始アドレス（16MB）
 
-#define SYS_PUTCHAR 1
-#define SYS_GETCHAR 2
+// RISC-V CSR（制御状態レジスタ）ビット定義
+#define SSTATUS_SPIE    (1 << 5)       // Supervisor Previous Interrupt Enable
+                                       // スーパーバイザモード割り込み有効フラグ
+
+// 例外原因コード（RISC-V仕様で定義されている値）
+#define SCAUSE_ECALL    8              // ユーザーモードからのシステムコール
+
+// システムコール番号（このOSで独自に定義）
+#define SYS_PUTCHAR 1                  // 文字出力システムコール
+#define SYS_GETCHAR 2                  // 文字入力システムコール
+
+// RISC-V ページフォルト例外コード
+#define SCAUSE_INST_PAGE_FAULT  12     // 命令フェッチ時のページフォルト
+#define SCAUSE_LOAD_PAGE_FAULT  13     // データ読み込み時のページフォルト
+#define SCAUSE_STORE_PAGE_FAULT 15     // データ書き込み時のページフォルト
+
+// メモリアライメントとページ権限
 #define ALIGN_DOWN(value, align) ((value) & ~((align) - 1))
-#define PAGE_READ    1
-#define PAGE_WRITE   2
-#define PAGE_EXEC    4
+#define PAGE_READ    (1 << 0)              // ページ読み取り権限
+#define PAGE_WRITE   (1 << 1)              // ページ書き込み権限  
+#define PAGE_EXEC    (1 << 2)              // ページ実行権限
+
+// スタックとプロセスの制限
+#define KERNEL_STACK_SIZE   (128 * 1024)  // カーネルスタック 128KB
+#define PROCESS_STACK_SIZE  (8 * 1024)    // プロセススタック 8KB
+#define MAX_MEMORY_SIZE     (64 * 1024 * 1024) // 最大メモリサイズ 64MB
 
 void user_entry(void);
 
+// OpenSBI呼び出しの戻り値構造体
 struct sbiret {
-    long error;
-    long value;
+    long error;    // エラーコード
+    long value;    // 戻り値
 };
 
+// トラップフレーム：例外発生時にCPUレジスタを保存する構造体
+// RISC-V レジスタセット（exception.cの保存順序と一致）
 struct trap_frame {
     uint32_t ra, gp, tp, t0, t1, t2, t3, t4, t5, t6, a0, a1, a2, a3, a4, a5, a6, a7,
              s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, sp;
 };
 
+// RISC-V CSR（制御状態レジスタ）読み取りマクロ
 #define READ_CSR(reg) ({                                                       \
     unsigned long __tmp;                                                       \
     __asm__ __volatile__("csrr %0, " #reg : "=r"(__tmp));                      \
     __tmp;                                                                     \
 })
 
+// RISC-V CSR（制御状態レジスタ）書き込みマクロ
 #define WRITE_CSR(reg, val) ({                                                 \
     __asm__ __volatile__("csrw " #reg ", %0" : : "r"(val));                    \
 })
@@ -50,12 +88,14 @@ void printf(const char *format, ...);
 void *memset(void *buf, char c, size_t n);
 void handle_syscall(struct trap_frame *f);
 
+// 値が指定されたアライメント境界に整列しているかチェック
 static inline int is_aligned(uint32_t value, uint32_t alignment) {
     return (value & (alignment - 1)) == 0;
 }
 
+// パニック：回復不能なエラーが発生した時にシステムを停止
 #define PANIC(fmt, ...)                                                        \
     do {                                                                       \
         printf("PANIC: %s:%d: " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__);  \
-        while (1) {}                                                           \
+        while (1) {}  /* 無限ループでシステムを停止 */                              \
     } while (0)

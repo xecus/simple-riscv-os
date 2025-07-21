@@ -34,8 +34,6 @@ long getchar(void) {
 void putchar(char ch) {
     sbi_call(ch, 0, 0, 0, 0, 0, 0, 1 /* Console Putchar */);
 }
-
-
 void printf(const char *fmt, ...) {
     __builtin_va_list vargs;
     __builtin_va_start(vargs, fmt);

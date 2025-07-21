@@ -90,11 +90,9 @@ struct process *create_process(uint32_t pc) {
     for (paddr_t paddr = (paddr_t) __kernel_base;
          paddr < (paddr_t) __free_ram_end; paddr += PAGE_SIZE) {
         map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
-	page_count++;
+    page_count++;
     }
     printf(" -> page_count=%d\n", page_count);
-
-
     // 各フィールドを初期化
     proc->pid = i + 1;
     proc->state = PROC_RUNNABLE;
@@ -103,10 +101,24 @@ struct process *create_process(uint32_t pc) {
     return proc;
 }
 
+/**
+ * @brief ユーザープログラムからプロセスを作成
+ * @param image ユーザープログラムのバイナリデータ
+ * @param image_size バイナリサイズ
+ * @return 作成されたプロセス構造体
+ * 
+ * プロセス作成の手順：
+ * 1. 空きプロセススロットを検索
+ * 2. カーネルスタックの初期化
+ * 3. ページテーブル（仮想メモリマップ）作成
+ * 4. ユーザープログラムをメモリにロード
+ * 5. プロセス構造体の初期化
+ */
 struct process *create_process2(const void *image, size_t image_size) {
 
     printf("[create_process2]\n");
-    // 空いているプロセス管理構造体を探す
+    
+    // 空いているプロセス管理構造体を検索
     struct process *proc = NULL;
     int i;
     for (i = 0; i < PROCS_MAX; i++) {
@@ -119,9 +131,10 @@ struct process *create_process2(const void *image, size_t image_size) {
     if (!proc)
         PANIC("no free process slots");
 
-    // switch_context() で復帰できるように、スタックに呼び出し先保存レジスタを積む
+    // コンテキストスイッチ用のスタック初期化
+    // switch_context()で復帰できるように、RISC-V呼び出し先保存レジスタを設定
     uint32_t *sp = (uint32_t *) &proc->stack[sizeof(proc->stack)];
-    *--sp = 0;                      // s11
+    *--sp = 0;                      // s11 (saved register)
     *--sp = 0;                      // s10
     *--sp = 0;                      // s9
     *--sp = 0;                      // s8
@@ -133,8 +146,9 @@ struct process *create_process2(const void *image, size_t image_size) {
     *--sp = 0;                      // s2
     *--sp = 0;                      // s1
     *--sp = 0;                      // s0
-    *--sp = (uint32_t) user_entry;  // ra
+    *--sp = (uint32_t) user_entry;  // ra (return address) - ユーザーモードエントリポイント
 
+    // プロセス専用ページテーブル（仮想メモリマップ）を作成
     uint32_t *page_table = (uint32_t *) alloc_pages(1);
     printf("page_table=0x%x\n", page_table);
 
@@ -143,7 +157,7 @@ struct process *create_process2(const void *image, size_t image_size) {
     for (paddr_t paddr = (paddr_t) __kernel_base;
          paddr < (paddr_t) __free_ram_end; paddr += PAGE_SIZE) {
         map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
-	page_count++;
+    page_count++;
     }
     //printf(" -> [kernel] page_count=%d\n", page_count);
 
@@ -196,7 +210,7 @@ void yield(void) {
         "csrw sscratch, %[sscratch]\n"
         :
         : [satp] "r" (SATP_SV32 | ((uint32_t) next->page_table / PAGE_SIZE)),
-	  [sscratch] "r" ((uint32_t) &next->stack[sizeof(next->stack)])
+      [sscratch] "r" ((uint32_t) &next->stack[sizeof(next->stack)])
     );
 
     // コンテキストスイッチ
