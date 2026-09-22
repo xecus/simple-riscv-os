@@ -1,5 +1,8 @@
 #pragma once
-#include "common.h"
+
+// common.h は include しない。shell.elf には common.c をリンクしないため、
+// memcpy/strcpy/strcmp の宣言だけ見えている状態になってしまう。
+// ユーザー空間で必要な宣言はこのファイルに閉じておく。
 
 #define SYS_PUTCHAR 1
 #define SYS_GETCHAR 2
