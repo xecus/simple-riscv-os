@@ -6,7 +6,11 @@ void kernel_entry(void) {
 
     __asm__ __volatile__(
         "csrrw sp, sscratch, sp\n"
-        "addi sp, sp, -4 * 31\n"
+
+        // 退避するレジスタは31本だが、確保するのは32ワード（128バイト）。
+        // 124バイトだと sp が16バイト境界から外れ、RISC-V の呼び出し規約に
+        // 反した状態で handle_trap を呼ぶことになる。末尾1ワードは詰め物
+        "addi sp, sp, -4 * 32\n"
         "sw ra,  4 * 0(sp)\n"
         "sw gp,  4 * 1(sp)\n"
         "sw tp,  4 * 2(sp)\n"
@@ -41,7 +45,7 @@ void kernel_entry(void) {
         "csrr a0, sscratch\n"
         "sw a0, 4 * 30(sp)\n"
 
-        "addi a0, sp, 4 * 31\n"
+        "addi a0, sp, 4 * 32\n"
         "csrw sscratch, a0\n"
 
         "mv a0, sp\n"

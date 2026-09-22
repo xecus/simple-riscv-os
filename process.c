@@ -59,15 +59,21 @@ __attribute__((naked)) void switch_context(uint32_t *prev_sp,
 }
 
 /**
- * @brief アイドルプロセスの本体
+ * @brief アイドルプロセスの本体（現状この関数には到達しない）
  *
- * 実際にはブート時のコンテキストがそのままアイドルプロセスになるため
- * ここへ制御が来ることはないが、万一スケジュールされてもユーザーモードへ
- * 落ちないように、カーネルモードのままループする実装を置いておく。
+ * ブート時のコンテキストがそのままアイドルプロセスになるため、
+ * alloc_process() が積んだ ra は最初の switch_context で procs[0].sp ごと
+ * 上書きされ、ここへ制御が来ることはない。実際のアイドルループは
+ * create_user_processes() の末尾にある。
+ *
+ * 到達したら設計の前提が崩れているので、黙って回らずに落とす。
+ * この経路を生かす場合は、割り込みの許可（sstatus.SIE）だけでは足りず、
+ * sscratch を別のスタックへ向ける必要がある。この関数は sscratch が指す
+ * スタックそのものの上で動くため、そのままではトラップフレームが
+ * 自分のフレームを上書きしてしまう。
  */
 static void idle_entry(void) {
-    while (1)
-        __asm__ __volatile__("wfi");
+    PANIC("idle_entry reached: the boot context should be the idle process");
 }
 
 /**
@@ -128,6 +134,7 @@ static struct process *alloc_process(uint32_t entry) {
     proc->pid = i + 1;
     proc->sp = (uint32_t) sp;
     proc->page_table = create_page_table();
+    proc->wake_time = 0;
 
     // state は最後に設定する。これより前に PROC_RUNNABLE にしてしまうと、
     // ページテーブル未設定のプロセスがスケジューラから見えてしまう
@@ -186,6 +193,22 @@ struct process *create_process2(const void *image, size_t image_size) {
     }
 
     return proc;
+}
+
+/**
+ * @brief 起床時刻を過ぎた待機中プロセスを実行可能に戻す
+ * @param now 現在のタイマカウンタ値
+ *
+ * タイマ割り込みのたびに呼ばれる。sleep 中のプロセスはスケジューラの
+ * 候補から外れているため、ここで PROC_RUNNABLE に戻して初めて
+ * 再び実行されるようになる。
+ */
+void wake_expired_processes(uint64_t now) {
+    for (int i = 0; i < PROCS_MAX; i++) {
+        if (procs[i].state == PROC_SLEEPING && now >= procs[i].wake_time) {
+            procs[i].state = PROC_RUNNABLE;
+        }
+    }
 }
 
 void yield(void) {

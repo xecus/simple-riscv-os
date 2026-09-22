@@ -42,6 +42,10 @@ int getchar(void) {
     return syscall(SYS_GETCHAR, 0, 0, 0);
 }
 
+int getpid(void) {
+    return syscall(SYS_GETPID, 0, 0, 0);
+}
+
 void putchar(char ch) {
     syscall(SYS_PUTCHAR, ch, 0, 0);
 }
@@ -62,15 +66,15 @@ void sleep_ms(int ms) {
  * @brief 指定秒数だけ待機する
  * @param seconds 待機する秒数（0以下なら何もしない）
  *
- * カーネル側でも上限に丸められるが、ここでの乗算が溢れない範囲に制限する。
+ * seconds * 1000 が int を溢れない範囲に制限する。
  */
 void sleep(int seconds) {
     if (seconds <= 0) {
         return;
     }
 
-    if (seconds > 400) {
-        seconds = 400;
+    if (seconds > 2000000) {
+        seconds = 2000000;
     }
 
     sleep_ms(seconds * 1000);
@@ -210,9 +214,17 @@ __attribute__((noreturn)) void exit(void) {
 }
 
 void main(void) {
-    // 1秒ごとに Hello World を表示し続ける
+    int pid = getpid();
+
+    // 2つのプロセスが同じイメージを実行するため、開始タイミングをずらして
+    // 出力が重なりにくいようにする。printf は1文字ごとのシステムコールで
+    // 途中でプリエンプションされうるため、これは重なる確率を下げるだけで
+    // あり、排他制御ではない。しかも2プロセスの周期にはわずかな差があり
+    // （実測で約0.2ms/回）、ずらした500msは数十分かけて縮んでいく
+    sleep_ms((pid % 2) * 500);
+
     for (;;) {
-        printf("Hello World\n");
+        printf("[pid %d] Hello World\n", pid);
         sleep(1);
     }
 }

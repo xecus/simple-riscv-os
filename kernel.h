@@ -17,6 +17,7 @@
 typedef unsigned int uint32_t;         // 32ビット符号なし整数
 typedef unsigned long size_t;          // サイズを表す型
 typedef unsigned char uint8_t;         // 8ビット符号なし整数  
+typedef unsigned long long uint64_t;   // 64ビット符号なし整数
 typedef uint32_t paddr_t;              // 物理アドレス型
 typedef uint32_t vaddr_t;              // 仮想アドレス型
 
@@ -33,14 +34,25 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
                                        // スーパーバイザモード割り込み有効フラグ
 #define SSTATUS_SPP     (1 << 8)       // Supervisor Previous Privilege
                                        // 0ならトラップ元はユーザーモード
+#define SSTATUS_SIE     (1 << 1)       // Supervisor Interrupt Enable
+                                       // スーパーバイザモードでの割り込み許可
+
+// 割り込み許可レジスタ（sie）のビット定義
+#define SIE_STIE        (1 << 5)       // Supervisor Timer Interrupt Enable
 
 // 例外原因コード（RISC-V仕様で定義されている値）
 #define SCAUSE_ECALL    8              // ユーザーモードからのシステムコール
+
+// scause の最上位ビットが立っていれば例外ではなく割り込み。
+// 残りのビットが割り込みの種類を表す
+#define SCAUSE_INTERRUPT        0x80000000u
+#define SCAUSE_TIMER_INTERRUPT  5      // スーパーバイザタイマ割り込み
 
 // システムコール番号（このOSで独自に定義）
 #define SYS_PUTCHAR 1                  // 文字出力システムコール
 #define SYS_GETCHAR 2                  // 文字入力システムコール
 #define SYS_SLEEP   3                  // 指定ミリ秒だけ待機するシステムコール
+#define SYS_GETPID  4                  // 自プロセスのIDを取得するシステムコール
 
 // RISC-V ページフォルト例外コード
 #define SCAUSE_INST_PAGE_FAULT  12     // 命令フェッチ時のページフォルト
@@ -60,9 +72,13 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
 #define TIMER_FREQ_HZ   10000000u         // タイマ周波数（10MHz）
 #define TICKS_PER_MS    (TIMER_FREQ_HZ / 1000)  // 1ミリ秒あたりのカウント数
 
-// RV32 の time CSR は32ビット。符号なしの差分で経過時間を測るため、
-// 一度に待てるのは約429秒まで。これを超える要求は上限に丸める
-#define SLEEP_MAX_MS    (0xffffffffu / TICKS_PER_MS)
+// タイムスライスの長さ。この間隔でタイマ割り込みが発生し、
+// 実行中のプロセスから強制的にCPUを取り上げる
+#define TICK_INTERVAL_MS    10
+
+// SBI Timer 拡張（経過時間の通知に使う）
+#define SBI_EID_TIME        0x54494D45  // "TIME"
+#define SBI_FID_SET_TIMER   0
 
 void user_entry(void);
 
@@ -105,6 +121,25 @@ void handle_syscall(struct trap_frame *f);
 // 値が指定されたアライメント境界に整列しているかチェック
 static inline int is_aligned(uint32_t value, uint32_t alignment) {
     return (value & (alignment - 1)) == 0;
+}
+
+/**
+ * @brief 64ビットのタイマカウンタを読む
+ *
+ * RV32 では time CSR が下位32ビット、timeh が上位32ビットに分かれている。
+ * 下位を読んだ直後に桁上がりが起きると値が壊れるため、
+ * 上位を読み直して一致するまでやり直す。
+ */
+static inline uint64_t read_time(void) {
+    uint32_t hi, lo, hi_again;
+
+    do {
+        hi       = (uint32_t) READ_CSR(timeh);
+        lo       = (uint32_t) READ_CSR(time);
+        hi_again = (uint32_t) READ_CSR(timeh);
+    } while (hi != hi_again);
+
+    return ((uint64_t) hi << 32) | lo;
 }
 
 // パニック：回復不能なエラーが発生した時にシステムを停止

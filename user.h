@@ -7,6 +7,7 @@
 #define SYS_PUTCHAR 1
 #define SYS_GETCHAR 2
 #define SYS_SLEEP   3
+#define SYS_GETPID  4
 
 // Core system functions
 __attribute__((noreturn)) void exit(void);
@@ -17,3 +18,6 @@ void printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 // 待機。負の値やゼロを渡した場合は何もせずに戻る
 void sleep_ms(int ms);
 void sleep(int seconds);
+
+// 自プロセスのIDを取得する
+int getpid(void);
