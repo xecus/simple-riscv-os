@@ -59,27 +59,21 @@ __attribute__((naked)) void switch_context(uint32_t *prev_sp,
 }
 
 /**
- * @brief アイドルプロセスの本体
+ * @brief アイドルプロセスの本体（現状この関数には到達しない）
  *
- * 実際にはブート時のコンテキストがそのままアイドルプロセスになるため
- * ここへ制御が来ることはないが、万一スケジュールされてもユーザーモードへ
- * 落ちないように、カーネルモードのままループする実装を置いておく。
+ * ブート時のコンテキストがそのままアイドルプロセスになるため、
+ * alloc_process() が積んだ ra は最初の switch_context で procs[0].sp ごと
+ * 上書きされ、ここへ制御が来ることはない。実際のアイドルループは
+ * create_user_processes() の末尾にある。
+ *
+ * 到達したら設計の前提が崩れているので、黙って回らずに落とす。
+ * この経路を生かす場合は、割り込みの許可（sstatus.SIE）だけでは足りず、
+ * sscratch を別のスタックへ向ける必要がある。この関数は sscratch が指す
+ * スタックそのものの上で動くため、そのままではトラップフレームが
+ * 自分のフレームを上書きしてしまう。
  */
 static void idle_entry(void) {
-    // 上のコメントのとおりこの関数には現状到達しないが、アイドルループ
-    // （create_user_processes）と挙動を揃えるために設定しておく。
-    // これが無いと wfi からは復帰してもハンドラが呼ばれず、
-    // sleep 中のプロセスを永久に起こせなくなる。
-    //
-    // ただし、この経路を実際に生かす場合は注意が要る。アイドルループが
-    // 安全なのはブートスタックで動いていて sscratch が別の領域
-    // （procs[0].stack）を指しているからで、この関数は sscratch が指す
-    // スタックそのものの上で動く。ここでスタックを使う処理を足すと、
-    // トラップフレームが自分のフレームを上書きしてしまう
-    WRITE_CSR(sstatus, READ_CSR(sstatus) | SSTATUS_SIE);
-
-    while (1)
-        __asm__ __volatile__("wfi");
+    PANIC("idle_entry reached: the boot context should be the idle process");
 }
 
 /**
