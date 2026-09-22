@@ -16,11 +16,19 @@ curl -LO https://github.com/qemu/qemu/raw/v8.0.4/pc-bios/opensbi-riscv32-generic
 
 ## ビルドと実行
 
+Linux / WSL:
+
 ```bash
 ./run.sh
 ```
 
-このスクリプトは以下を実行します：
+Windows（PowerShell または cmd から実行すること）:
+
+```powershell
+.\run.ps1
+```
+
+これらのスクリプトは以下を実行します：
 - ClangとLLVMを使用してクロスコンパイル
 - QEMUでRISC-V仮想マシンを起動
 - カーネルとユーザープログラムを実行
@@ -51,12 +59,12 @@ curl -LO https://github.com/qemu/qemu/raw/v8.0.4/pc-bios/opensbi-riscv32-generic
 - **内容**:
   - プロセス構造体定義
   - プロセス状態定数
-  - メモリマッピング権限定数
+  - プロセス管理関数の宣言
 
 #### `process.c`
 - **役割**: プロセス管理機能の実装
 - **機能**:
-  - プロセス作成（create_process、create_process2）
+  - プロセス作成（create_idle_process、create_process2）
   - コンテキストスイッチ（switch_context）
   - スケジューリング（yield）
   - ページテーブル管理
@@ -64,16 +72,15 @@ curl -LO https://github.com/qemu/qemu/raw/v8.0.4/pc-bios/opensbi-riscv32-generic
 #### `memory.h`
 - **役割**: メモリ管理の定数と関数宣言
 - **内容**:
-  - ページテーブルエントリ構造
+  - ページテーブルエントリのフラグ定義（V/R/W/X/U/A/D）
   - SATP レジスタ定数
-  - メモリ管理関数宣言
+  - メモリ管理関数宣言、TLB無効化ヘルパー
 
 #### `memory.c`
 - **役割**: メモリ管理機能の実装
 - **機能**:
-  - 物理メモリページ割り当て/解放
-  - ページテーブル操作
-  - 仮想アドレス・物理アドレス変換
+  - 物理メモリページ割り当て（バンプアロケータ方式。解放は未実装）
+  - Sv32 2段ページテーブルの操作
 
 ### ユーザー空間ファイル
 
@@ -131,6 +138,12 @@ curl -LO https://github.com/qemu/qemu/raw/v8.0.4/pc-bios/opensbi-riscv32-generic
   - リンカスクリプトを使用したメモリレイアウト制御
   - QEMUでの実行
 
+#### `run.ps1`
+- **役割**: Windowsネイティブ用のビルド・実行スクリプト（run.shのPowerShell版）
+- **機能**:
+  - PATH上のLLVM/QEMUを自動検出
+  - `-fuse-ld=lld` でLLDを明示指定（Windowsにriscv32向けGNU ldが無いため）
+
 #### `kernel.ld`
 - **役割**: カーネル用リンカスクリプト
 - **機能**:
@@ -146,6 +159,8 @@ curl -LO https://github.com/qemu/qemu/raw/v8.0.4/pc-bios/opensbi-riscv32-generic
 ### 1. デマンドページング
 - プログラムが実際にメモリにアクセスした時にページを割り当て
 - メモリ使用量の最適化と起動の高速化
+- 割り当て対象はユーザー空間（USER_BASE〜USER_LIMIT）に限定。
+  範囲外へのアクセスやカーネルモードで発生したページフォルトはPANICで検出する
 
 ### 2. システムコール
 - RISC-V ecall命令を使用
@@ -165,5 +180,6 @@ curl -LO https://github.com/qemu/qemu/raw/v8.0.4/pc-bios/opensbi-riscv32-generic
 - **仮想メモリ**: Sv32（4KB ページング）
 - **特権レベル**: User mode (U) + Supervisor mode (S)  
 - **ページサイズ**: 4KB
-- **ユーザー空間開始**: 0x1000000 (16MB)
+- **ユーザー空間**: 0x1000000 (16MB) 〜 0x1800000 (24MB)
 - **最大メモリ**: 64MB
+- **ページテーブル**: カーネル領域のマッピングは全プロセスで共有（1プロセスあたり1ページ）

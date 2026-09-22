@@ -2,6 +2,12 @@
 
 extern char __stack_top[];
 
+// printf の内部ヘルパー（このファイル内だけで使う static 関数）
+static void process_format_specifier(char spec, __builtin_va_list *args);
+static void print_string(const char *str);
+static void print_decimal(int value);
+static void print_hexadecimal(unsigned value);
+
 /**
  * @brief システムコール呼び出しインターface
  * @param sysno システムコール番号
