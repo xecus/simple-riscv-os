@@ -9,6 +9,13 @@ struct process procs[PROCS_MAX];
 struct process *current_proc; // 現在実行中のプロセス
 struct process *idle_proc;
 
+// 全プロセス共通のカーネル領域マッピングの雛形。
+// カーネル領域のマッピングはどのプロセスでも同一なので、一度だけ作って
+// 各プロセスには1段目テーブル（1ページ）をコピーするだけで済ませる。
+static uint32_t *kernel_page_table;
+
+static void idle_entry(void);
+
 __attribute__((naked)) void switch_context(uint32_t *prev_sp,
                                            uint32_t *next_sp) {
     __asm__ __volatile__(
@@ -51,9 +58,45 @@ __attribute__((naked)) void switch_context(uint32_t *prev_sp,
     );
 }
 
-struct process *create_process(uint32_t pc) {
-    printf("[create_process]\n");
-    // 空いているプロセス管理構造体を探す
+/**
+ * @brief アイドルプロセスの本体
+ *
+ * 実際にはブート時のコンテキストがそのままアイドルプロセスになるため
+ * ここへ制御が来ることはないが、万一スケジュールされてもユーザーモードへ
+ * 落ちないように、カーネルモードのままループする実装を置いておく。
+ */
+static void idle_entry(void) {
+    while (1)
+        __asm__ __volatile__("wfi");
+}
+
+/**
+ * @brief プロセス用の1段目ページテーブルを作る
+ *
+ * カーネル領域のストレートマッピングは全プロセスで共通なので、
+ * 初回だけ雛形を構築し、以降は1ページ分のコピーで済ませる。
+ * （毎回マップし直すと1プロセスあたり約16,400回の map_page が走る）
+ */
+static uint32_t *create_page_table(void) {
+    if (!kernel_page_table) {
+        kernel_page_table = (uint32_t *) alloc_pages(1);
+        for (paddr_t paddr = (paddr_t) __kernel_base;
+             paddr < (paddr_t) __free_ram_end; paddr += PAGE_SIZE) {
+            map_page(kernel_page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
+        }
+    }
+
+    uint32_t *page_table = (uint32_t *) alloc_pages(1);
+    memcpy(page_table, kernel_page_table, PAGE_SIZE);
+    return page_table;
+}
+
+/**
+ * @brief 空いているプロセス管理構造体を確保して初期化の下準備をする
+ * @param entry switch_context() で最初に復帰する先のアドレス
+ * @return 確保したプロセス構造体（pid/state は呼び出し側で確定させる）
+ */
+static struct process *alloc_process(uint32_t entry) {
     struct process *proc = NULL;
     int i;
     for (i = 0; i < PROCS_MAX; i++) {
@@ -66,7 +109,7 @@ struct process *create_process(uint32_t pc) {
     if (!proc)
         PANIC("no free process slots");
 
-    // switch_context() で復帰できるように、スタックに呼び出し先保存レジスタを積む
+    // switch_context() で復帰できるように、RISC-V呼び出し先保存レジスタを積む
     uint32_t *sp = (uint32_t *) &proc->stack[sizeof(proc->stack)];
     *--sp = 0;                      // s11
     *--sp = 0;                      // s10
@@ -80,24 +123,25 @@ struct process *create_process(uint32_t pc) {
     *--sp = 0;                      // s2
     *--sp = 0;                      // s1
     *--sp = 0;                      // s0
-    *--sp = (uint32_t) pc;          // ra
+    *--sp = entry;                  // ra
 
-    uint32_t *page_table = (uint32_t *) alloc_pages(1);
-    printf("page_table=0x%x\n", page_table);
-
-    // カーネルのページをマッピングする
-    int page_count = 0;
-    for (paddr_t paddr = (paddr_t) __kernel_base;
-         paddr < (paddr_t) __free_ram_end; paddr += PAGE_SIZE) {
-        map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
-    page_count++;
-    }
-    printf(" -> page_count=%d\n", page_count);
-    // 各フィールドを初期化
     proc->pid = i + 1;
     proc->state = PROC_RUNNABLE;
     proc->sp = (uint32_t) sp;
-    proc->page_table = page_table;
+    proc->page_table = create_page_table();
+    return proc;
+}
+
+/**
+ * @brief アイドルプロセスを作成
+ *
+ * ユーザープログラムを持たないカーネル内プロセス。ユーザー空間の
+ * マッピングを行わないため、user_entry ではなく idle_entry から始まる。
+ */
+struct process *create_idle_process(void) {
+    printf("[create_idle_process]\n");
+    struct process *proc = alloc_process((uint32_t) idle_entry);
+    printf("page_table=0x%x\n", (uint32_t) proc->page_table);
     return proc;
 }
 
@@ -106,60 +150,20 @@ struct process *create_process(uint32_t pc) {
  * @param image ユーザープログラムのバイナリデータ
  * @param image_size バイナリサイズ
  * @return 作成されたプロセス構造体
- * 
+ *
  * プロセス作成の手順：
- * 1. 空きプロセススロットを検索
- * 2. カーネルスタックの初期化
- * 3. ページテーブル（仮想メモリマップ）作成
- * 4. ユーザープログラムをメモリにロード
- * 5. プロセス構造体の初期化
+ * 1. 空きプロセススロットを確保しカーネルスタックを初期化
+ * 2. ページテーブル（仮想メモリマップ）作成
+ * 3. ユーザープログラムをメモリにロードしてマッピング
  */
 struct process *create_process2(const void *image, size_t image_size) {
 
     printf("[create_process2]\n");
-    
-    // 空いているプロセス管理構造体を検索
-    struct process *proc = NULL;
-    int i;
-    for (i = 0; i < PROCS_MAX; i++) {
-        if (procs[i].state == PROC_UNUSED) {
-            proc = &procs[i];
-            break;
-        }
-    }
 
-    if (!proc)
-        PANIC("no free process slots");
-
-    // コンテキストスイッチ用のスタック初期化
-    // switch_context()で復帰できるように、RISC-V呼び出し先保存レジスタを設定
-    uint32_t *sp = (uint32_t *) &proc->stack[sizeof(proc->stack)];
-    *--sp = 0;                      // s11 (saved register)
-    *--sp = 0;                      // s10
-    *--sp = 0;                      // s9
-    *--sp = 0;                      // s8
-    *--sp = 0;                      // s7
-    *--sp = 0;                      // s6
-    *--sp = 0;                      // s5
-    *--sp = 0;                      // s4
-    *--sp = 0;                      // s3
-    *--sp = 0;                      // s2
-    *--sp = 0;                      // s1
-    *--sp = 0;                      // s0
-    *--sp = (uint32_t) user_entry;  // ra (return address) - ユーザーモードエントリポイント
-
-    // プロセス専用ページテーブル（仮想メモリマップ）を作成
-    uint32_t *page_table = (uint32_t *) alloc_pages(1);
-    printf("page_table=0x%x\n", page_table);
-
-    // カーネルのページをマッピングする
-    int page_count = 0;
-    for (paddr_t paddr = (paddr_t) __kernel_base;
-         paddr < (paddr_t) __free_ram_end; paddr += PAGE_SIZE) {
-        map_page(page_table, paddr, paddr, PAGE_R | PAGE_W | PAGE_X);
-    page_count++;
-    }
-    //printf(" -> [kernel] page_count=%d\n", page_count);
+    // 空きスロット確保 + カーネルスタック初期化 + ページテーブル作成。
+    // ユーザーモードのエントリポイント user_entry から実行を始める
+    struct process *proc = alloc_process((uint32_t) user_entry);
+    printf("page_table=0x%x\n", (uint32_t) proc->page_table);
 
     // ユーザーのページをマッピングする
     for (uint32_t off = 0; off < image_size; off += PAGE_SIZE) {
@@ -174,15 +178,10 @@ struct process *create_process2(const void *image, size_t image_size) {
         memcpy((void *) page, image + off, copy_size);
 
         // ページテーブルにマッピング
-        map_page(page_table, USER_BASE + off, page,
+        map_page(proc->page_table, USER_BASE + off, page,
                  PAGE_U | PAGE_R | PAGE_W | PAGE_X);
     }
 
-    // 各フィールドを初期化
-    proc->pid = i + 1;
-    proc->state = PROC_RUNNABLE;
-    proc->sp = (uint32_t) sp;
-    proc->page_table = page_table;
     return proc;
 }
 

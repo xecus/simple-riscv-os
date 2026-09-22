@@ -7,7 +7,8 @@ extern char __bss[], __bss_end[], __stack_top[];
 extern char _binary_shell_bin_start[], _binary_shell_bin_size[];
 
 // Forward declarations for internal functions
-static void handle_page_fault(uint32_t fault_addr);
+static void handle_page_fault(uint32_t fault_addr, uint32_t scause,
+                              uint32_t fault_pc);
 static long syscall_getchar(void);
 static void init_process_management(void);
 static void create_user_process(void);
@@ -35,7 +36,7 @@ __attribute__((naked)) void user_entry(void) {
  * 2. 例外の種類に応じて適切な処理を実行
  * 3. ユーザーモードに復帰
  */
-void handle_trap(struct trap_frame *f __attribute__((unused))) {
+void handle_trap(struct trap_frame *f) {
     // RISC-V CSRから例外情報を取得
     uint32_t scause = READ_CSR(scause);    // 例外原因
     uint32_t stval = READ_CSR(stval);      // 例外に関連する値（アドレスなど）
@@ -52,7 +53,7 @@ void handle_trap(struct trap_frame *f __attribute__((unused))) {
         case SCAUSE_LOAD_PAGE_FAULT:    // データ読み取りでページがない  
         case SCAUSE_STORE_PAGE_FAULT:   // データ書き込みでページがない
             // ページフォルト：必要なメモリページを動的に割り当て（デマンドページング）
-            handle_page_fault(stval);
+            handle_page_fault(stval, scause, user_pc);
             break;
 
         default:
@@ -68,17 +69,38 @@ void handle_trap(struct trap_frame *f __attribute__((unused))) {
 /**
  * @brief ページフォルトを処理してメモリページを動的に割り当て
  * @param fault_addr ページフォルトが発生した仮想アドレス
- * 
+ * @param scause 例外原因（命令フェッチ/読み込み/書き込みの区別）
+ * @param fault_pc フォルトを起こした命令のアドレス
+ *
  * デマンドページング：プログラムが実際にメモリにアクセスした時に
  * 初めてそのページを割り当てる方式。これにより：
  * - メモリ使用量を最小限に抑える
  * - 大きなプログラムでも起動を高速化
  * - 未使用部分にメモリを浪費しない
+ *
+ * ただし、無条件に割り当ててはならない。検査を省くと、ヌルポインタ参照も
+ * カーネル領域への書き込みも「新しいページを割り当てて再実行」で
+ * 黙って成功してしまい、メモリ保護が成立しなくなる。
  */
-static void handle_page_fault(uint32_t fault_addr) {
+static void handle_page_fault(uint32_t fault_addr, uint32_t scause,
+                              uint32_t fault_pc) {
+    // sstatus.SPP が 1 なら、トラップ元はスーパーバイザモード。
+    // カーネル自身のバグなので、ページを割り当てて隠蔽してはいけない
+    if (READ_CSR(sstatus) & SSTATUS_SPP) {
+        PANIC("page fault in kernel mode: addr=0x%x scause=%d sepc=0x%x",
+              fault_addr, (int) scause, fault_pc);
+    }
+
+    // デマンドページングの対象はユーザー空間に限定する。
+    // 範囲外へのアクセスは不正アクセスとして扱う
+    if (fault_addr < USER_BASE || fault_addr >= USER_LIMIT) {
+        PANIC("invalid memory access by pid=%d: addr=0x%x scause=%d sepc=0x%x",
+              current_proc->pid, fault_addr, (int) scause, fault_pc);
+    }
+
     // ページ境界にアラインメント（4KB境界に切り下げ）
     uint32_t vaddr = ALIGN_DOWN(fault_addr, PAGE_SIZE);
-    
+
     // 新しい物理ページを1つ割り当て
     paddr_t paddr = alloc_pages(1);
 
@@ -86,6 +108,9 @@ static void handle_page_fault(uint32_t fault_addr) {
     // フルアクセス権限（読み取り/書き込み/実行 + ユーザーアクセス可能）
     map_page(current_proc->page_table, vaddr, paddr,
              PAGE_U | PAGE_R | PAGE_W | PAGE_X);
+
+    // PTEを書き換えただけではTLBに反映されないため、明示的に無効化する
+    flush_tlb_page(vaddr);
 }
 
 /**
@@ -117,7 +142,7 @@ void handle_syscall(struct trap_frame *f) {
 
         default:
             // 未定義のシステムコール：システムを停止
-            PANIC("Unknown system call: %d", syscall_num);
+            PANIC("Unknown system call: %d", (int) syscall_num);
     }
 }
 
@@ -175,7 +200,7 @@ void kernel_main(void) {
  */
 static void init_process_management(void) {
     // アイドルプロセスを作成（他のプロセスが実行可能でない時に動作）
-    idle_proc = create_process2(NULL, 0);
+    idle_proc = create_idle_process();
     idle_proc->pid = 0;  // 特別なプロセスID 0を割り当て
     current_proc = idle_proc;
 }

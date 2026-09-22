@@ -25,10 +25,14 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
 // メモリレイアウト定数
 #define PAGE_SIZE       4096           // ページサイズ（4KB）
 #define USER_BASE       0x1000000      // ユーザー空間開始アドレス（16MB）
+#define USER_LIMIT      0x1800000      // ユーザー空間終端アドレス（24MB）
+                                       // user.ld の ASSERT と同じ値にすること
 
 // RISC-V CSR（制御状態レジスタ）ビット定義
 #define SSTATUS_SPIE    (1 << 5)       // Supervisor Previous Interrupt Enable
                                        // スーパーバイザモード割り込み有効フラグ
+#define SSTATUS_SPP     (1 << 8)       // Supervisor Previous Privilege
+                                       // 0ならトラップ元はユーザーモード
 
 // 例外原因コード（RISC-V仕様で定義されている値）
 #define SCAUSE_ECALL    8              // ユーザーモードからのシステムコール
@@ -42,16 +46,11 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
 #define SCAUSE_LOAD_PAGE_FAULT  13     // データ読み込み時のページフォルト
 #define SCAUSE_STORE_PAGE_FAULT 15     // データ書き込み時のページフォルト
 
-// メモリアライメントとページ権限
+// メモリアライメント
 #define ALIGN_DOWN(value, align) ((value) & ~((align) - 1))
-#define PAGE_READ    (1 << 0)              // ページ読み取り権限
-#define PAGE_WRITE   (1 << 1)              // ページ書き込み権限  
-#define PAGE_EXEC    (1 << 2)              // ページ実行権限
 
-// スタックとプロセスの制限
-#define KERNEL_STACK_SIZE   (128 * 1024)  // カーネルスタック 128KB
-#define PROCESS_STACK_SIZE  (8 * 1024)    // プロセススタック 8KB
-#define MAX_MEMORY_SIZE     (64 * 1024 * 1024) // 最大メモリサイズ 64MB
+// プロセスごとのカーネルスタックサイズ
+#define PROCESS_STACK_SIZE  (8 * 1024)    // 8KB
 
 void user_entry(void);
 
@@ -84,7 +83,10 @@ struct sbiret sbi_call(long arg0, long arg1, long arg2, long arg3, long arg4,
                        long arg5, long fid, long eid);
 void putchar(char ch);
 long getchar(void);
-void printf(const char *format, ...);
+
+// format属性を付けることで、書式指定子と引数の型不一致をコンパイル時に検出する
+void printf(const char *format, ...) __attribute__((format(printf, 1, 2)));
+
 void *memset(void *buf, char c, size_t n);
 void handle_syscall(struct trap_frame *f);
 
