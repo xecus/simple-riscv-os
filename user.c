@@ -66,15 +66,15 @@ void sleep_ms(int ms) {
  * @brief 指定秒数だけ待機する
  * @param seconds 待機する秒数（0以下なら何もしない）
  *
- * カーネル側でも上限に丸められるが、ここでの乗算が溢れない範囲に制限する。
+ * seconds * 1000 が int を溢れない範囲に制限する。
  */
 void sleep(int seconds) {
     if (seconds <= 0) {
         return;
     }
 
-    if (seconds > 400) {
-        seconds = 400;
+    if (seconds > 2000000) {
+        seconds = 2000000;
     }
 
     sleep_ms(seconds * 1000);

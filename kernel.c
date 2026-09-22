@@ -219,20 +219,15 @@ static void syscall_sleep(uint32_t ms) {
 
 /**
  * @brief 現在のプロセスを指定ミリ秒だけ待機状態にしてCPUを手放す
- * @param ms 待機するミリ秒数（SLEEP_MAX_MS を超える値は上限に丸める）
+ * @param ms 待機するミリ秒数
  *
  * 待機中のプロセスは yield() の候補から外れるため、CPUを消費しない。
  * タイマ割り込みのたびに wake_expired_processes() が起床時刻を確認する。
  */
 static void block_current_process(uint32_t ms) {
-    // カウント数への変換を32ビットで行うため、呼び出し側に任せず
-    // ここで上限を確定させる。溢れると起床時刻が過去になり、
-    // 次のティックで即座に起きてしまう
-    if (ms > SLEEP_MAX_MS) {
-        ms = SLEEP_MAX_MS;
-    }
-
-    current_proc->wake_time = read_time() + ms * TICKS_PER_MS;
+    // 64ビットで計算する。32ビットのまま掛けると約429秒で溢れ、
+    // 起床時刻が過去になって次のティックで即座に起きてしまう
+    current_proc->wake_time = read_time() + (uint64_t) ms * TICKS_PER_MS;
     current_proc->state = PROC_SLEEPING;
     yield();
 }

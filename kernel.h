@@ -72,10 +72,6 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
 #define TIMER_FREQ_HZ   10000000u         // タイマ周波数（10MHz）
 #define TICKS_PER_MS    (TIMER_FREQ_HZ / 1000)  // 1ミリ秒あたりのカウント数
 
-// ミリ秒からカウント数への変換を32ビットで行うため、
-// 一度に待てるのは約429秒まで。これを超える要求は上限に丸める
-#define SLEEP_MAX_MS    (0xffffffffu / TICKS_PER_MS)
-
 // タイムスライスの長さ。この間隔でタイマ割り込みが発生し、
 // 実行中のプロセスから強制的にCPUを取り上げる
 #define TICK_INTERVAL_MS    10
