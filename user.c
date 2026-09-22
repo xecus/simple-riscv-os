@@ -45,6 +45,37 @@ int getchar(void) {
 void putchar(char ch) {
     syscall(SYS_PUTCHAR, ch, 0, 0);
 }
+
+/**
+ * @brief 指定ミリ秒だけ待機する
+ * @param ms 待機するミリ秒数（0以下なら何もしない）
+ */
+void sleep_ms(int ms) {
+    if (ms <= 0) {
+        return;
+    }
+
+    syscall(SYS_SLEEP, ms, 0, 0);
+}
+
+/**
+ * @brief 指定秒数だけ待機する
+ * @param seconds 待機する秒数（0以下なら何もしない）
+ *
+ * カーネル側でも上限に丸められるが、ここでの乗算が溢れない範囲に制限する。
+ */
+void sleep(int seconds) {
+    if (seconds <= 0) {
+        return;
+    }
+
+    if (seconds > 400) {
+        seconds = 400;
+    }
+
+    sleep_ms(seconds * 1000);
+}
+
 /**
  * @brief フォーマット付き文字列出力（簡易printf実装）
  * @param fmt フォーマット文字列（%s, %d, %x, %%をサポート）
@@ -179,13 +210,11 @@ __attribute__((noreturn)) void exit(void) {
 }
 
 void main(void) {
-    printf("Hello1\n");
-    printf("Hello2\n");
-    printf("Hello3\n");
-    printf("Hello World\n");
-    printf("Hello World\n");
-    printf("Hello World\n");
-    for (;;);
+    // 1秒ごとに Hello World を表示し続ける
+    for (;;) {
+        printf("Hello World\n");
+        sleep(1);
+    }
 }
 
 __attribute__((section(".text.start")))
