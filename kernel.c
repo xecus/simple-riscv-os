@@ -10,6 +10,7 @@ extern char _binary_shell_bin_start[], _binary_shell_bin_size[];
 static void handle_page_fault(uint32_t fault_addr, uint32_t scause,
                               uint32_t fault_pc);
 static long syscall_getchar(void);
+static void syscall_sleep(uint32_t ms);
 static void init_process_management(void);
 static void create_user_process(void);
 
@@ -140,6 +141,12 @@ void handle_syscall(struct trap_frame *f) {
             f->a0 = syscall_getchar();
             break;
 
+        case SYS_SLEEP:
+            // 待機：a0レジスタのミリ秒数だけ待つ
+            syscall_sleep((uint32_t) f->a0);
+            f->a0 = 0; // 成功を示す戻り値
+            break;
+
         default:
             // 未定義のシステムコール：システムを停止
             PANIC("Unknown system call: %d", (int) syscall_num);
@@ -160,6 +167,34 @@ static long syscall_getchar(void) {
             return ch;
         }
         yield(); // 入力待ちの間、他のプロセスを実行
+    }
+}
+
+/**
+ * @brief 指定ミリ秒だけ待機する
+ * @param ms 待機するミリ秒数
+ *
+ * タイマ割り込みが未実装のため、time CSR をポーリングして経過を判定する。
+ * 待っている間は yield() で他のプロセスにCPUを譲るので、協調的
+ * マルチタスクの範囲では他プロセスの実行を妨げない。
+ *
+ * 経過判定に符号なしの引き算を使っているのは、time CSR が32ビットで
+ * 一周しても差分が正しく求まるようにするため。
+ */
+static void syscall_sleep(uint32_t ms) {
+    if (ms == 0) {
+        return;
+    }
+
+    if (ms > SLEEP_MAX_MS) {
+        ms = SLEEP_MAX_MS;
+    }
+
+    uint32_t start = (uint32_t) READ_CSR(time);
+    uint32_t ticks = ms * TICKS_PER_MS;
+
+    while ((uint32_t) READ_CSR(time) - start < ticks) {
+        yield();
     }
 }
 

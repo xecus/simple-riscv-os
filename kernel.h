@@ -40,6 +40,7 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
 // システムコール番号（このOSで独自に定義）
 #define SYS_PUTCHAR 1                  // 文字出力システムコール
 #define SYS_GETCHAR 2                  // 文字入力システムコール
+#define SYS_SLEEP   3                  // 指定ミリ秒だけ待機するシステムコール
 
 // RISC-V ページフォルト例外コード
 #define SCAUSE_INST_PAGE_FAULT  12     // 命令フェッチ時のページフォルト
@@ -51,6 +52,17 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
 
 // プロセスごとのカーネルスタックサイズ
 #define PROCESS_STACK_SIZE  (8 * 1024)    // 8KB
+
+// タイマ関連定数
+// QEMU virt マシンの mtimer は 10MHz で動作する（OpenSBI の起動ログに
+// "Platform Timer Device : aclint-mtimer @ 10000000Hz" として出る）。
+// time CSR はこの周波数でカウントアップするので、経過時間の測定に使える。
+#define TIMER_FREQ_HZ   10000000u         // タイマ周波数（10MHz）
+#define TICKS_PER_MS    (TIMER_FREQ_HZ / 1000)  // 1ミリ秒あたりのカウント数
+
+// RV32 の time CSR は32ビット。符号なしの差分で経過時間を測るため、
+// 一度に待てるのは約429秒まで。これを超える要求は上限に丸める
+#define SLEEP_MAX_MS    (0xffffffffu / TICKS_PER_MS)
 
 void user_entry(void);
 
