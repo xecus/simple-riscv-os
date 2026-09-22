@@ -92,9 +92,9 @@ static uint32_t *create_page_table(void) {
 }
 
 /**
- * @brief 空いているプロセス管理構造体を確保して初期化の下準備をする
+ * @brief 空いているプロセス管理構造体を確保して初期化する
  * @param entry switch_context() で最初に復帰する先のアドレス
- * @return 確保したプロセス構造体（pid/state は呼び出し側で確定させる）
+ * @return 実行可能状態になったプロセス構造体
  */
 static struct process *alloc_process(uint32_t entry) {
     struct process *proc = NULL;
@@ -126,9 +126,12 @@ static struct process *alloc_process(uint32_t entry) {
     *--sp = entry;                  // ra
 
     proc->pid = i + 1;
-    proc->state = PROC_RUNNABLE;
     proc->sp = (uint32_t) sp;
     proc->page_table = create_page_table();
+
+    // state は最後に設定する。これより前に PROC_RUNNABLE にしてしまうと、
+    // ページテーブル未設定のプロセスがスケジューラから見えてしまう
+    proc->state = PROC_RUNNABLE;
     return proc;
 }
 
