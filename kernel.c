@@ -264,8 +264,16 @@ static void handle_interrupt(uint32_t code) {
 static void schedule_next_tick(void) {
     uint64_t next = read_time() + TICK_INTERVAL_MS * TICKS_PER_MS;
 
-    sbi_call((long) (uint32_t) next, (long) (uint32_t) (next >> 32),
-             0, 0, 0, 0, SBI_FID_SET_TIMER, SBI_EID_TIME);
+    struct sbiret ret = sbi_call((long) (uint32_t) next,
+                                 (long) (uint32_t) (next >> 32),
+                                 0, 0, 0, 0, SBI_FID_SET_TIMER, SBI_EID_TIME);
+
+    // 予約に失敗するとタイマ割り込みが二度と発生しない。sleep は
+    // ポーリングを廃止しているため、誰もプロセスを起こせないまま
+    // wfi で静かに停止してしまう。原因の分かる形で即座に落とす
+    if (ret.error != 0) {
+        PANIC("sbi_set_timer failed: error=%d", (int) ret.error);
+    }
 }
 
 /**
@@ -281,6 +289,13 @@ static void schedule_next_tick(void) {
  * 唯一の例外はアイドルループで、そこだけは明示的に SIE を立てる。
  */
 static void init_timer(void) {
+    // 「カーネル実行中は割り込みが入らない」という前提を自前で確定させる。
+    // ファームウェアが sstatus.SIE を 0 で渡してくる保証は無く、もし
+    // 1 のままだと最初の yield() より前にタイマ割り込みが入りうる。
+    // その時点では sscratch が未設定（0）なので、kernel_entry が
+    // トラップフレームをアドレス 0 へ書き込んで多重フォルトになる
+    WRITE_CSR(sstatus, READ_CSR(sstatus) & ~(uint32_t) SSTATUS_SIE);
+
     schedule_next_tick();
 
     // ファームウェアが残した設定を引き継がないよう、代入で上書きする。

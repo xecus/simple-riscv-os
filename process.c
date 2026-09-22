@@ -66,7 +66,8 @@ __attribute__((naked)) void switch_context(uint32_t *prev_sp,
  * 落ちないように、カーネルモードのままループする実装を置いておく。
  */
 static void idle_entry(void) {
-    // wfi で停止している間もタイマ割り込みを受け取れるようにする。
+    // 上のコメントのとおりこの関数には現状到達しないが、アイドルループ
+    // （create_user_processes）と挙動を揃えるために設定しておく。
     // これが無いと wfi からは復帰してもハンドラが呼ばれず、
     // sleep 中のプロセスを永久に起こせなくなる
     WRITE_CSR(sstatus, READ_CSR(sstatus) | SSTATUS_SIE);
