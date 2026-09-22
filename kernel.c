@@ -11,6 +11,7 @@ static void handle_page_fault(uint32_t fault_addr, uint32_t scause,
                               uint32_t fault_pc);
 static long syscall_getchar(void);
 static void syscall_sleep(uint32_t ms);
+static void block_current_process(uint32_t ms);
 static void handle_interrupt(uint32_t code);
 static void schedule_next_tick(void);
 static void init_timer(void);
@@ -179,8 +180,11 @@ void handle_syscall(struct trap_frame *f) {
  * @brief コンソールから文字を取得（ブロッキング）
  * @return 文字コード、失敗時はエラー
  * 
- * 入力待ちの間、他のプロセスにCPU時間を譲ることで
- * システム全体の応答性を保ちます。
+ * 入力が無い間は1ティックずつ待機状態に入る。ここで yield() を
+ * 直接回してしまうと、カーネルモードのまま（sstatus.SIE = 0 のまま）
+ * 実行を続けることになり、タイマ割り込みが一切入らなくなる。
+ * 2つ以上のプロセスが同時に入力待ちになると互いを選び合い続け、
+ * sleep 中のプロセスを誰も起こせなくなるため、必ず待機状態を経由する。
  */
 static long syscall_getchar(void) {
     while (1) {
@@ -188,7 +192,11 @@ static long syscall_getchar(void) {
         if (ch >= 0) {
             return ch;
         }
-        yield(); // 入力待ちの間、他のプロセスを実行
+
+        // 1ティック待ってから再確認する。待機中はスケジューラの
+        // 候補から外れるので、他に実行可能なプロセスが無ければ
+        // アイドルプロセスへ落ち、そこでタイマ割り込みを受けられる
+        block_current_process(TICK_INTERVAL_MS);
     }
 }
 
@@ -210,6 +218,17 @@ static void syscall_sleep(uint32_t ms) {
         ms = SLEEP_MAX_MS;
     }
 
+    block_current_process(ms);
+}
+
+/**
+ * @brief 現在のプロセスを指定ミリ秒だけ待機状態にしてCPUを手放す
+ * @param ms 待機するミリ秒数（SLEEP_MAX_MS 以下であること）
+ *
+ * 待機中のプロセスは yield() の候補から外れるため、CPUを消費しない。
+ * タイマ割り込みのたびに wake_expired_processes() が起床時刻を確認する。
+ */
+static void block_current_process(uint32_t ms) {
     current_proc->wake_time = read_time() + ms * TICKS_PER_MS;
     current_proc->state = PROC_SLEEPING;
     yield();
@@ -252,14 +271,22 @@ static void schedule_next_tick(void) {
 /**
  * @brief タイマ割り込みを有効にする
  *
- * sie の STIE を立てるだけではまだ割り込みは発生しない。
- * sstatus.SIE も必要だが、これはユーザーモードへ遷移する際に
- * user_entry() が SPIE 経由で立てる。結果としてカーネル実行中は
- * 割り込みが入らず、トラップハンドラの多重実行を防いでいる。
+ * sie の STIE を立てると、ユーザーモード実行中はタイマ割り込みが
+ * 有効になる。RISC-V の仕様では、U-mode で実行している間は
+ * sstatus.SIE の値が無視され、S-mode の割り込みは常に有効になる。
+ *
+ * 逆にカーネル実行中は sstatus.SIE = 0 なので割り込みが入らない。
+ * これによりトラップハンドラの多重実行（＝kernel_entry がカーネル
+ * スタックを上書きする事故）を防いでいる。
+ * 唯一の例外はアイドルループで、そこだけは明示的に SIE を立てる。
  */
 static void init_timer(void) {
     schedule_next_tick();
-    WRITE_CSR(sie, READ_CSR(sie) | SIE_STIE);
+
+    // ファームウェアが残した設定を引き継がないよう、代入で上書きする。
+    // handle_interrupt() はタイマ以外の割り込みで PANIC するため、
+    // 有効にする割り込みをここで確定させておく
+    WRITE_CSR(sie, SIE_STIE);
 }
 
 /**
@@ -326,7 +353,12 @@ static void create_user_processes(void) {
     // アイドルループ：実行可能なプロセスが無いときにここへ戻ってくる。
     // wfi で停止している間もタイマ割り込みを受け取れるように、
     // スーパーバイザモードの割り込みを許可しておく。
-    // これが無いと、全プロセスが sleep した時点で誰も起こせなくなる
+    // これが無いと、全プロセスが sleep した時点で誰も起こせなくなる。
+    //
+    // ここでの割り込みはスーパーバイザモードからの発生になるが、
+    // アイドルはブート時のスタックで動いているのに対し sscratch は
+    // 未使用の procs[0].stack を指しているため、kernel_entry が積む
+    // トラップフレームはブートスタックと衝突しない
     WRITE_CSR(sstatus, READ_CSR(sstatus) | SSTATUS_SIE);
 
     while (1) {
