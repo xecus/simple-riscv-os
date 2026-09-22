@@ -1,0 +1,7 @@
+# シェルスクリプトは必ずLFでチェックアウトする。
+# core.autocrlf=true の環境でCRLFに変換されると、シェバン行が
+# "/bin/bash\r" と解釈されて WSL や Linux で実行できなくなるため。
+*.sh text eol=lf
+
+# PowerShellスクリプトはWindows流儀のCRLFで揃える
+*.ps1 text eol=crlf
