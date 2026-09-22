@@ -13,7 +13,13 @@ struct process {
     vaddr_t sp;          // コンテキストスイッチ時のスタックポインタ
     uint32_t *page_table;
     uint64_t wake_time;  // PROC_SLEEPING のときの起床時刻（time CSR の値）
-    uint8_t stack[PROCESS_STACK_SIZE]; // カーネルスタック
+
+    // カーネルスタック。RISC-V の呼び出し規約はスタックポインタが16バイト
+    // 境界にあることを要求する。スタック末尾をそのまま sp / sscratch に
+    // 使うため、ここを16バイト境界に揃えて構造体サイズも16の倍数にする
+    // （揃えないと wake_time の分だけサイズが 8216 になり、配列の
+    //   奇数番目の要素で末尾が8バイト境界にずれる）
+    uint8_t stack[PROCESS_STACK_SIZE] __attribute__((aligned(16)));
 };
 
 extern char __kernel_base[];
