@@ -128,6 +128,7 @@ static struct process *alloc_process(uint32_t entry) {
     proc->pid = i + 1;
     proc->sp = (uint32_t) sp;
     proc->page_table = create_page_table();
+    proc->wake_time = 0;
 
     // state は最後に設定する。これより前に PROC_RUNNABLE にしてしまうと、
     // ページテーブル未設定のプロセスがスケジューラから見えてしまう
@@ -186,6 +187,22 @@ struct process *create_process2(const void *image, size_t image_size) {
     }
 
     return proc;
+}
+
+/**
+ * @brief 起床時刻を過ぎた待機中プロセスを実行可能に戻す
+ * @param now 現在のタイマカウンタ値
+ *
+ * タイマ割り込みのたびに呼ばれる。sleep 中のプロセスはスケジューラの
+ * 候補から外れているため、ここで PROC_RUNNABLE に戻して初めて
+ * 再び実行されるようになる。
+ */
+void wake_expired_processes(uint64_t now) {
+    for (int i = 0; i < PROCS_MAX; i++) {
+        if (procs[i].state == PROC_SLEEPING && now >= procs[i].wake_time) {
+            procs[i].state = PROC_RUNNABLE;
+        }
+    }
 }
 
 void yield(void) {

@@ -11,8 +11,11 @@ static void handle_page_fault(uint32_t fault_addr, uint32_t scause,
                               uint32_t fault_pc);
 static long syscall_getchar(void);
 static void syscall_sleep(uint32_t ms);
+static void handle_interrupt(uint32_t code);
+static void schedule_next_tick(void);
+static void init_timer(void);
 static void init_process_management(void);
-static void create_user_process(void);
+static void create_user_processes(void);
 
 __attribute__((naked)) void user_entry(void) {
     __asm__ __volatile__(
@@ -43,6 +46,19 @@ void handle_trap(struct trap_frame *f) {
     uint32_t stval = READ_CSR(stval);      // 例外に関連する値（アドレスなど）
     uint32_t user_pc = READ_CSR(sepc);     // 例外発生時のPC
 
+    // sepc と sstatus はCSR、つまり全プロセス共通の1組しかない。
+    // 処理中に yield() でプロセスが切り替わると別プロセスが書き換えてしまうため、
+    // 自分のカーネルスタック上に退避しておき、復帰直前に書き戻す
+    uint32_t saved_sstatus = READ_CSR(sstatus);
+
+    if (scause & SCAUSE_INTERRUPT) {
+        // 割り込み：例外と違い、復帰先のPCは進めずに中断した命令から再開する
+        handle_interrupt(scause & ~SCAUSE_INTERRUPT);
+        WRITE_CSR(sstatus, saved_sstatus);
+        WRITE_CSR(sepc, user_pc);
+        return;
+    }
+
     switch (scause) {
         case SCAUSE_ECALL:
             // システムコール：ユーザープログラムがカーネルの機能を呼び出し
@@ -64,6 +80,7 @@ void handle_trap(struct trap_frame *f) {
     }
 
     // 修正されたPCをCSRに書き戻し（ユーザーモード復帰時に使用）
+    WRITE_CSR(sstatus, saved_sstatus);
     WRITE_CSR(sepc, user_pc);
 }
 
@@ -141,6 +158,11 @@ void handle_syscall(struct trap_frame *f) {
             f->a0 = syscall_getchar();
             break;
 
+        case SYS_GETPID:
+            // プロセスID取得：呼び出し元プロセスのIDを返す
+            f->a0 = current_proc->pid;
+            break;
+
         case SYS_SLEEP:
             // 待機：a0レジスタのミリ秒数だけ待つ
             syscall_sleep((uint32_t) f->a0);
@@ -174,12 +196,10 @@ static long syscall_getchar(void) {
  * @brief 指定ミリ秒だけ待機する
  * @param ms 待機するミリ秒数
  *
- * タイマ割り込みが未実装のため、time CSR をポーリングして経過を判定する。
- * 待っている間は yield() で他のプロセスにCPUを譲るので、協調的
- * マルチタスクの範囲では他プロセスの実行を妨げない。
- *
- * 経過判定に符号なしの引き算を使っているのは、time CSR が32ビットで
- * 一周しても差分が正しく求まるようにするため。
+ * 起床時刻を記録したうえでプロセスを PROC_SLEEPING にし、CPUを手放す。
+ * 待機中はスケジューラの候補から外れるため、CPUをまったく消費しない。
+ * タイマ割り込みのたびに wake_expired_processes() が起床時刻を確認し、
+ * 時刻が来たプロセスを PROC_RUNNABLE に戻す。
  */
 static void syscall_sleep(uint32_t ms) {
     if (ms == 0) {
@@ -190,12 +210,56 @@ static void syscall_sleep(uint32_t ms) {
         ms = SLEEP_MAX_MS;
     }
 
-    uint32_t start = (uint32_t) READ_CSR(time);
-    uint32_t ticks = ms * TICKS_PER_MS;
+    current_proc->wake_time = read_time() + ms * TICKS_PER_MS;
+    current_proc->state = PROC_SLEEPING;
+    yield();
+}
 
-    while ((uint32_t) READ_CSR(time) - start < ticks) {
-        yield();
+/**
+ * @brief 割り込みを処理する
+ * @param code 割り込みの種類（scause の最上位ビットを除いた値）
+ */
+static void handle_interrupt(uint32_t code) {
+    if (code != SCAUSE_TIMER_INTERRUPT) {
+        PANIC("Unexpected interrupt: code=%d", (int) code);
     }
+
+    // 先に次のティックを予約する。予約し直さないとタイマ割り込みが
+    // 保留されたままになり、同じ割り込みが延々と再発生してしまう
+    schedule_next_tick();
+
+    // 起床時刻を過ぎた待機中プロセスを実行可能に戻す
+    wake_expired_processes(read_time());
+
+    // 実行中のプロセスからCPUを取り上げ、次のプロセスへ切り替える。
+    // プロセスの同意を必要としないこの切り替えがプリエンプション
+    yield();
+}
+
+/**
+ * @brief 次のタイマ割り込みを予約する
+ *
+ * SBI の Timer 拡張に「この時刻になったら割り込んでくれ」と依頼する。
+ * 依頼と同時に、保留中のタイマ割り込みはクリアされる。
+ */
+static void schedule_next_tick(void) {
+    uint64_t next = read_time() + TICK_INTERVAL_MS * TICKS_PER_MS;
+
+    sbi_call((long) (uint32_t) next, (long) (uint32_t) (next >> 32),
+             0, 0, 0, 0, SBI_FID_SET_TIMER, SBI_EID_TIME);
+}
+
+/**
+ * @brief タイマ割り込みを有効にする
+ *
+ * sie の STIE を立てるだけではまだ割り込みは発生しない。
+ * sstatus.SIE も必要だが、これはユーザーモードへ遷移する際に
+ * user_entry() が SPIE 経由で立てる。結果としてカーネル実行中は
+ * 割り込みが入らず、トラップハンドラの多重実行を防いでいる。
+ */
+static void init_timer(void) {
+    schedule_next_tick();
+    WRITE_CSR(sie, READ_CSR(sie) | SIE_STIE);
 }
 
 /**
@@ -220,8 +284,11 @@ void kernel_main(void) {
     // プロセス管理システムの初期化
     init_process_management();
 
+    // タイマ割り込みを有効化（プリエンプションの土台）
+    init_timer();
+
     // ユーザープロセスを作成して実行開始
-    create_user_process();
+    create_user_processes();
 
     // ここには到達しない（アイドルプロセスが永続実行）
     PANIC("Kernel main returned unexpectedly");
@@ -241,16 +308,27 @@ static void init_process_management(void) {
 }
 
 /**
- * @brief メインユーザープロセスを作成・開始
+ * @brief ユーザープロセスを作成・開始
  * 
  * ユーザープログラム（shell.bin）をロードしてプロセスとして起動し、
- * その後はアイドルループに入ります。
+ * その後はアイドルループに入ります。アイドルループは起動時の
+ * コンテキストがそのまま使われ、PID 0 のアイドルプロセスとして扱われます。
  */
-static void create_user_process(void) {
+static void create_user_processes(void) {
+    // 同じイメージから2つのプロセスを作る。create_process2() が
+    // プロセスごとに物理ページとページテーブルを用意するため、
+    // 両者のメモリ空間は完全に独立している
     create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size);
+    create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size);
+
     yield(); // ユーザープロセスに切り替え
 
-    // アイドルループ：ユーザープロセスが実行可能でない時に実行
+    // アイドルループ：実行可能なプロセスが無いときにここへ戻ってくる。
+    // wfi で停止している間もタイマ割り込みを受け取れるように、
+    // スーパーバイザモードの割り込みを許可しておく。
+    // これが無いと、全プロセスが sleep した時点で誰も起こせなくなる
+    WRITE_CSR(sstatus, READ_CSR(sstatus) | SSTATUS_SIE);
+
     while (1) {
         __asm__ __volatile__("wfi"); // 割り込み待ち（省電力）
     }

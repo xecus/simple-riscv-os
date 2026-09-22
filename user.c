@@ -42,6 +42,10 @@ int getchar(void) {
     return syscall(SYS_GETCHAR, 0, 0, 0);
 }
 
+int getpid(void) {
+    return syscall(SYS_GETPID, 0, 0, 0);
+}
+
 void putchar(char ch) {
     syscall(SYS_PUTCHAR, ch, 0, 0);
 }
@@ -210,9 +214,14 @@ __attribute__((noreturn)) void exit(void) {
 }
 
 void main(void) {
-    // 1秒ごとに Hello World を表示し続ける
+    int pid = getpid();
+
+    // 2つのプロセスが同じイメージを実行するため、出力が重ならないように
+    // 開始タイミングをずらす
+    sleep_ms((pid % 2) * 500);
+
     for (;;) {
-        printf("Hello World\n");
+        printf("[pid %d] Hello World\n", pid);
         sleep(1);
     }
 }
