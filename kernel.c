@@ -289,13 +289,6 @@ static void schedule_next_tick(void) {
  * 唯一の例外はアイドルループで、そこだけは明示的に SIE を立てる。
  */
 static void init_timer(void) {
-    // 「カーネル実行中は割り込みが入らない」という前提を自前で確定させる。
-    // ファームウェアが sstatus.SIE を 0 で渡してくる保証は無く、もし
-    // 1 のままだと最初の yield() より前にタイマ割り込みが入りうる。
-    // その時点では sscratch が未設定（0）なので、kernel_entry が
-    // トラップフレームをアドレス 0 へ書き込んで多重フォルトになる
-    WRITE_CSR(sstatus, READ_CSR(sstatus) & ~(uint32_t) SSTATUS_SIE);
-
     schedule_next_tick();
 
     // ファームウェアが残した設定を引き継がないよう、代入で上書きする。
@@ -315,6 +308,14 @@ static void init_timer(void) {
  * 5. アイドルループに入る
  */
 void kernel_main(void) {
+    // 何よりも先に割り込みを止める。stvec を設定する前にトラップが起きると
+    // 飛び先がファームウェアの残した値になり、さらに sscratch も未設定（0）
+    // なので kernel_entry がトラップフレームを不正なアドレスへ書き込む。
+    // ファームウェアが sstatus.SIE や sie を 0 で渡す保証は無いため、
+    // 前提に頼らずここで確定させる
+    WRITE_CSR(sstatus, READ_CSR(sstatus) & ~(uint32_t) SSTATUS_SIE);
+    WRITE_CSR(sie, 0);
+
     // BSS領域をゼロで初期化（C言語の仕様により必要）
     memset(__bss, 0, (size_t)__bss_end - (size_t)__bss);
 
