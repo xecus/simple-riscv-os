@@ -10,11 +10,11 @@ SECTIONS {
     }
 
     .rodata : ALIGN(4) {
-        *(.rodata .rodata.*);
+        *(.rodata .rodata.* .srodata .srodata.*);
     }
 
     .data : ALIGN(4) {
-        *(.data .data.*);
+        *(.data .data.* .sdata .sdata.*);
     }
 
     .bss : ALIGN(4) {

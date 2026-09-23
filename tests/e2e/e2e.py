@@ -163,9 +163,15 @@ def scenario_console():
         q.expect_text("exit\nbye\n")
         q.expect_text("[kernel] pid 3 exited\n")
 
-        # コンソールが終わった後も printer は同じ周期で動き続ける
-        times = []
-        next_tick = tick + 1
+        # コンソールが終わった後も printer は同じ周期で動き続ける。
+        # 操作中に出た tick は照合で読み飛ばしていることがあるので、
+        # exit 後に最初に見えた tick を起点に連番と間隔を確かめる
+        m = q.expect(r"\[printer\] tick (\d+)\n", timeout=PRINTER_INTERVAL * 3)
+        next_tick = int(m.group(1))
+        if next_tick <= tick:
+            raise Failure("printer tick did not advance: %d -> %d" % (tick, next_tick))
+        times = [time.monotonic()]
+        next_tick += 1
         while len(times) < 3:
             m = q.expect(r"\[printer\] tick (\d+)\n", timeout=PRINTER_INTERVAL * 3)
             n = int(m.group(1))

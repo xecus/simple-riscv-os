@@ -57,13 +57,20 @@ void user_entry(void) {
     // start() から呼ばれる main の第1引数になる
     register reg_t a0 __asm__("a0") = current_proc->arg;
 
+    // sret の戻り先をユーザーモード（SPP = 0）にし、戻った後は割り込みを
+    // 有効にする（SPIE = 1）。値を丸ごと書かずに必要なビットだけ変えるのは、
+    // RV64 の sstatus には UXL（ユーザーモードのレジスタ幅）などのフィールドが
+    // あり、0 を書くと予約値になるため（書き込みを無視するかは実装次第）
+    reg_t sstatus = (READ_CSR(sstatus) & ~(reg_t) (SSTATUS_SPP | SSTATUS_SIE))
+                    | SSTATUS_SPIE;
+
     __asm__ __volatile__(
         "csrw sepc, %[sepc]\n"
         "csrw sstatus, %[sstatus]\n"
         "sret\n"
         :
         : [sepc] "r" (USER_BASE),
-          [sstatus] "r" (SSTATUS_SPIE),
+          [sstatus] "r" (sstatus),
           "r" (a0)
     );
 }
@@ -216,7 +223,7 @@ void handle_syscall(struct trap_frame *f) {
 
         default:
             // 未定義のシステムコール：システムを停止
-            PANIC("Unknown system call: %d", (int) syscall_num);
+            PANIC("Unknown system call: %ld", (long) syscall_num);
     }
 }
 
