@@ -24,6 +24,11 @@ if (-not (Test-Path "$PlatformDir/qemu.args")) {
     throw "PLATFORM=$Platform は QEMU で実行できません。build.sh でビルドしてください。"
 }
 
+# 成果物の出力先（build.sh の OUT に相当。既定: build/<PLATFORM>）。
+# リポジトリ直下を汚さないよう、プラットフォームごとに分ける
+$OutDir = if ($env:OUT) { $env:OUT } else { "build/$Platform" }
+New-Item -ItemType Directory -Force $OutDir | Out-Null
+
 # qemu.args から追加オプションを読む（# で始まる行は無視し、空白で分割する）。
 # Windows PowerShell 5.1 は BOM の無いファイルを ANSI（日本語環境では
 # Shift_JIS）として読み、日本語のコメント行が崩れるので UTF-8 を指定する
@@ -65,20 +70,27 @@ function Assert-Success {
 }
 
 # ユーザープログラムをビルドし、カーネルに埋め込めるオブジェクトへ変換
-& $CC @CFLAGS '-Wl,-Tuser.ld' '-Wl,-Map=shell.map' -o shell.elf usys.c ulib.c user.c
+& $CC @CFLAGS '-Wl,-Tuser.ld' "-Wl,-Map=$OutDir/shell.map" -o "$OutDir/shell.elf" usys.c ulib.c user.c
 Assert-Success 'shell.elf のビルド'
 
-& $OBJCOPY '--set-section-flags' '.bss=alloc,contents' -O binary shell.elf shell.bin
+& $OBJCOPY '--set-section-flags' '.bss=alloc,contents' -O binary "$OutDir/shell.elf" "$OutDir/shell.bin"
 Assert-Success 'shell.bin の生成'
 
-& $OBJCOPY -Ibinary -Oelf64-littleriscv shell.bin shell.bin.o
-Assert-Success 'shell.bin.o の生成'
+# -Ibinary が作るシンボル名（_binary_shell_bin_start など）は入力ファイルの
+# パスから決まる。カーネルが参照する名前に揃えるため、出力先で実行する
+Push-Location $OutDir
+try {
+    & $OBJCOPY -Ibinary -Oelf64-littleriscv shell.bin shell.bin.o
+    Assert-Success 'shell.bin.o の生成'
+} finally {
+    Pop-Location
+}
 
 # カーネルをビルド
-& $CC @CFLAGS "-Wl,-L$PlatformDir" '-Wl,-Tkernel.ld' '-Wl,-Map=kernel.map' -o kernel.elf `
-    kernel.c common.c sbi.c exception.c memory.c process.c shell.bin.o
+& $CC @CFLAGS "-Wl,-L$PlatformDir" '-Wl,-Tkernel.ld' "-Wl,-Map=$OutDir/kernel.map" -o "$OutDir/kernel.elf" `
+    kernel.c common.c sbi.c exception.c memory.c process.c "$OutDir/shell.bin.o"
 Assert-Success 'kernel.elf のビルド'
 
 # QEMUを起動。riscv64 用の OpenSBI は QEMU に同梱されているので -bios default で使う
 & $QEMU -machine virt @QemuArgs -bios default -nographic -serial mon:stdio --no-reboot `
-    -kernel kernel.elf
+    -kernel "$OutDir/kernel.elf"

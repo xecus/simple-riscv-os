@@ -2,7 +2,8 @@
 # カーネルとユーザープログラムをビルドする（QEMU は起動しない）
 #
 # run.sh とテスト（tests/）の両方から使う。環境変数で次を切り替えられる。
-#   OUT        成果物の出力先ディレクトリ（既定: リポジトリ直下）
+#   OUT        成果物の出力先ディレクトリ（既定: build/<PLATFORM>）
+#              リポジトリ直下を汚さないよう、プラットフォームごとに分ける
 #   USER_MAIN  ユーザープログラムの main を含むソース（既定: user.c）
 #              テストでは専用のユーザープログラムに差し替える
 #   PLATFORM   対象のプラットフォーム（既定: qemu-virt）
@@ -10,9 +11,9 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
-OUT=${OUT:-$ROOT}
 USER_MAIN=${USER_MAIN:-user.c}
 PLATFORM=${PLATFORM:-qemu-virt}
+OUT=${OUT:-$ROOT/build/$PLATFORM}
 PLATFORM_DIR="$ROOT/platform/$PLATFORM"
 if [ ! -f "$PLATFORM_DIR/platform.h" ] || [ ! -f "$PLATFORM_DIR/platform.ld" ]; then
     echo "build.sh: unknown PLATFORM '$PLATFORM' (see $ROOT/platform/)" >&2

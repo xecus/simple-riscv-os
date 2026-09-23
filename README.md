@@ -25,7 +25,11 @@ riscv64 用の OpenSBI（ファームウェア）は QEMU に同梱されてい�
 | `qemu-c906` | QEMU の virt マシン + T-Head C906 の CPU モデル + 64MB | できる | 動作確認済み |
 | `milkv-duo` | Milk-V Duo（CV1800B、64MB） | できない | ビルドのみ確認。値は公開資料に基づき、実機では未確認 |
 
-`run.sh` と `run.ps1` は、ビルドしてから QEMU を起動します。QEMU を終了するには
+成果物はプラットフォームごとに `build/<PLATFORM>/` へ出力され、リポジトリ直下には
+置かれません。たとえば qemu-c906 のカーネルは `build/qemu-c906/kernel.elf` です。
+出力先は環境変数 `OUT` で変えられます。
+
+`run.sh` と `run.ps1` は、ビルドしてから、そのとき出力した kernel.elf で QEMU を起動します。QEMU を終了するには
 `Ctrl-A` を押してから `X` を押します。
 
 ### qemu-virt
@@ -75,12 +79,11 @@ QEMU です。C906 の CPU モデルと 64MB の構成で動くことを確か�
 
 ### milkv-duo
 
-ビルドだけを行います。成果物がリポジトリ直下の QEMU 向けのものと混ざらないよう、
-`OUT` で出力先を分けることを勧めます。Windows では WSL から実行してください
+ビルドだけを行います。Windows では WSL から実行してください
 （`run.ps1` は QEMU で動かせるプラットフォーム専用です）。
 
 ```bash
-PLATFORM=milkv-duo OUT=build/milkv-duo ./build.sh
+PLATFORM=milkv-duo ./build.sh
 # → build/milkv-duo/kernel.elf
 ```
 
@@ -99,7 +102,7 @@ MAEE を有効にしていない場合も同じ症状になります。
 | 環境変数 | 意味 | 既定値 |
 |---|---|---|
 | `PLATFORM` | 対象のプラットフォーム | `qemu-virt` |
-| `OUT` | 成果物の出力先 | リポジトリ直下 |
+| `OUT` | 成果物の出力先 | `build/<PLATFORM>` |
 | `USER_MAIN` | ユーザープログラムの main を含むソース | `user.c` |
 
 QEMU を手で起動するときは、`platform/<名前>/qemu.args` に書かれた追加オプションを
@@ -107,7 +110,7 @@ QEMU を手で起動するときは、`platform/<名前>/qemu.args` に書かれ
 実行できます。qemu-c906 の例:
 
 ```bash
-PLATFORM=qemu-c906 OUT=build/qemu-c906 ./build.sh
+PLATFORM=qemu-c906 ./build.sh
 qemu-system-riscv64 -machine virt -cpu thead-c906 -m 64M -bios default \
     -nographic -serial mon:stdio --no-reboot -kernel build/qemu-c906/kernel.elf
 ```
@@ -253,11 +256,12 @@ tests/run_tests.sh
   - リンカスクリプトを使用したメモリレイアウト制御
   - 環境変数 OUT で出力先、USER_MAIN でユーザープログラム、PLATFORM で
     対象プラットフォームを切り替えられる
+  - 出力先の既定は build/<PLATFORM>（リポジトリ直下には出力しない）
 
 #### `run.sh`
 - **役割**: ビルド・実行スクリプト
 - **機能**:
-  - build.sh でビルドし、QEMUで実行する
+  - build.sh でビルドし、出力先（build/<PLATFORM> または OUT）の kernel.elf を QEMU で実行する
 
 #### `run.ps1`
 - **役割**: Windowsネイティブ用のビルド・実行スクリプト（run.shのPowerShell版）

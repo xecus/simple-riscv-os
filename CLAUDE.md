@@ -63,6 +63,8 @@ E2E テスト（tests/e2e/、実際の OS をシリアル経由で操作）を�
 - qemu-c906 は Duo の CPU（-cpu thead-c906）と 64MB に寄せた QEMU 構成。
   platform.ld は milkv-duo と揃える。タイマ周波数と PTE 属性は QEMU に合わせる
 - QEMU で実行できるのは platform/<名前>/qemu.args があるプラットフォームだけ
+- ビルド成果物は build/<PLATFORM>/ に出す（リポジトリ直下には出さない）。
+  build.sh、run.sh、run.ps1 で同じ規則にしている
 - run.ps1 は BOM 付き UTF-8 で保存する（無いと PowerShell 5.1 で構文エラーになる）
 - コンパイルフラグは build.sh、run.ps1、tests/run_tests.sh の3か所で揃える
 
