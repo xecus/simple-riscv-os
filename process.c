@@ -135,6 +135,7 @@ static struct process *alloc_process(uint32_t entry) {
     proc->sp = (uint32_t) sp;
     proc->page_table = create_page_table();
     proc->wake_time = 0;
+    proc->arg = 0;
 
     // state は最後に設定する。これより前に PROC_RUNNABLE にしてしまうと、
     // ページテーブル未設定のプロセスがスケジューラから見えてしまう
@@ -159,6 +160,7 @@ struct process *create_idle_process(void) {
  * @brief ユーザープログラムからプロセスを作成
  * @param image ユーザープログラムのバイナリデータ
  * @param image_size バイナリサイズ
+ * @param arg ユーザープログラムへ渡す起動引数（main の第1引数になる）
  * @return 作成されたプロセス構造体
  *
  * プロセス作成の手順：
@@ -166,13 +168,19 @@ struct process *create_idle_process(void) {
  * 2. ページテーブル（仮想メモリマップ）作成
  * 3. ユーザープログラムをメモリにロードしてマッピング
  */
-struct process *create_process2(const void *image, size_t image_size) {
+struct process *create_process2(const void *image, size_t image_size,
+                                uint32_t arg) {
 
     printf("[create_process2]\n");
 
     // 空きスロット確保 + カーネルスタック初期化 + ページテーブル作成。
     // ユーザーモードのエントリポイント user_entry から実行を始める
     struct process *proc = alloc_process((uint32_t) user_entry);
+
+    // 起動引数を控えておく。user_entry() がユーザーモードへ落ちる直前に
+    // a0 へ載せ、start() がそのまま main の第1引数として渡す
+    proc->arg = arg;
+
     printf("page_table=0x%x\n", (uint32_t) proc->page_table);
 
     // ユーザーのページをマッピングする
@@ -209,6 +217,27 @@ void wake_expired_processes(uint64_t now) {
             procs[i].state = PROC_RUNNABLE;
         }
     }
+}
+
+/**
+ * @brief 生きているユーザープロセスが残っているか調べる
+ * @return 1つでも残っていれば 1、無ければ 0
+ *
+ * アイドルプロセス（pid 0）と未使用スロットは数えない。終了済みの
+ * プロセスは PROC_EXITED のまま残るので、ここでも除外される。
+ */
+int has_live_process(void) {
+    for (int i = 0; i < PROCS_MAX; i++) {
+        if (procs[i].pid <= 0) {
+            continue;
+        }
+
+        if (procs[i].state == PROC_RUNNABLE || procs[i].state == PROC_SLEEPING) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 void yield(void) {

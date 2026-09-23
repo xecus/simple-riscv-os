@@ -12,20 +12,39 @@ static void handle_page_fault(uint32_t fault_addr, uint32_t scause,
 static long syscall_getchar(void);
 static void syscall_sleep(uint32_t ms);
 static void block_current_process(uint32_t ms);
+static void syscall_exit(void);
+static void shutdown(void);
 static void handle_interrupt(uint32_t code);
 static void schedule_next_tick(void);
 static void init_timer(void);
 static void init_process_management(void);
 static void create_user_processes(void);
 
-__attribute__((naked)) void user_entry(void) {
+/**
+ * @brief ユーザーモードへ落ちる入口
+ *
+ * プロセスが初めてスケジュールされたとき、switch_context() の ret から
+ * ここへ来る。起動引数を a0 に載せてから sret するので、ユーザー側の
+ * start() は a0 に触らずに main を呼ぶだけでよい。
+ *
+ * naked を外したのは、current_proc からの読み出しにコード生成が必要な
+ * ため。sret から先へは戻らないので、コンパイラが積むプロローグは
+ * 使われないまま放置される（カーネルスタックの先頭側に残るだけで、
+ * 次のトラップがその領域を上書きしても実害はない）。
+ */
+void user_entry(void) {
+    // ユーザーモードでの a0 の値。RISC-V の呼び出し規約により
+    // start() から呼ばれる main の第1引数になる
+    register uint32_t a0 __asm__("a0") = current_proc->arg;
+
     __asm__ __volatile__(
         "csrw sepc, %[sepc]\n"
         "csrw sstatus, %[sstatus]\n"
         "sret\n"
         :
         : [sepc] "r" (USER_BASE),
-          [sstatus] "r" (SSTATUS_SPIE)
+          [sstatus] "r" (SSTATUS_SPIE),
+          "r" (a0)
     );
 }
 
@@ -170,6 +189,11 @@ void handle_syscall(struct trap_frame *f) {
             f->a0 = 0; // 成功を示す戻り値
             break;
 
+        case SYS_EXIT:
+            // 終了：呼び出し元プロセスを終了させる。ここへは戻ってこない
+            syscall_exit();
+            break;
+
         default:
             // 未定義のシステムコール：システムを停止
             PANIC("Unknown system call: %d", (int) syscall_num);
@@ -237,6 +261,38 @@ static void block_current_process(uint32_t ms) {
     current_proc->wake_time = read_time() + (uint64_t) ms * TICKS_PER_MS;
     current_proc->state = PROC_SLEEPING;
     yield();
+}
+
+/**
+ * @brief 呼び出し元プロセスを終了させる
+ *
+ * 状態を PROC_EXITED にしてCPUを手放す。yield() は PROC_RUNNABLE の
+ * プロセスしか選ばないため、以降このプロセスがスケジュールされることはない。
+ *
+ * リソースは回収しない。alloc_pages() が解放手段を持たないバンプアロケータで
+ * あることと、このOSがプロセスを動的生成しない（起動時に作るだけ）ことによる。
+ * カーネルスタックも放置されるが、二度と使われないので安全。
+ */
+static void syscall_exit(void) {
+    int pid = current_proc->pid;
+
+    printf("[kernel] pid %d exited\n", pid);
+
+    current_proc->state = PROC_EXITED;
+    yield();
+
+    PANIC("exited process %d was scheduled again", pid);
+}
+
+/**
+ * @brief SBI 経由で電源を切る
+ *
+ * QEMU は --no-reboot 付きで起動しているため、そのままプロセスが終了する。
+ */
+static void shutdown(void) {
+    sbi_call(0, 0, 0, 0, 0, 0, 0, SBI_EID_SHUTDOWN);
+
+    PANIC("sbi shutdown did not take effect");
 }
 
 /**
@@ -365,9 +421,12 @@ static void init_process_management(void) {
 static void create_user_processes(void) {
     // 同じイメージから2つのプロセスを作る。create_process2() が
     // プロセスごとに物理ページとページテーブルを用意するため、
-    // 両者のメモリ空間は完全に独立している
-    create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size);
-    create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size);
+    // 両者のメモリ空間は完全に独立している。
+    // 役割は起動引数で伝える。PID の採番に依存させないため
+    create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size,
+                    PROC_ARG_PRINTER);
+    create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size,
+                    PROC_ARG_CONSOLE);
 
     yield(); // ユーザープロセスに切り替え
 
@@ -383,6 +442,14 @@ static void create_user_processes(void) {
     WRITE_CSR(sstatus, READ_CSR(sstatus) | SSTATUS_SIE);
 
     while (1) {
+        // 生きているユーザープロセスがいなくなったら電源を切る。
+        // タイマが1ティック（10ms）ごとにここを起こすので、
+        // 最大1ティック遅れで検出される
+        if (!has_live_process()) {
+            printf("[kernel] no live process remains, shutting down\n");
+            shutdown();
+        }
+
         __asm__ __volatile__("wfi"); // 割り込み待ち（省電力）
     }
 }
