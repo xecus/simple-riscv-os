@@ -55,6 +55,11 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
 #define SYS_GETPID  4                  // 自プロセスのIDを取得するシステムコール
 #define SYS_EXIT    5                  // 呼び出し元プロセスを終了するシステムコール
 
+// ユーザープロセスへ渡す起動引数。プロセス生成時に a0 レジスタへ載せる。
+// user.h にも同じ値を定義してあるので、変更するときは両方を直すこと
+#define PROC_ARG_PRINTER 0             // 一定間隔で出力し続けるプロセス
+#define PROC_ARG_CONSOLE 1             // 行入力を受け付けるプロセス
+
 // RISC-V ページフォルト例外コード
 #define SCAUSE_INST_PAGE_FAULT  12     // 命令フェッチ時のページフォルト
 #define SCAUSE_LOAD_PAGE_FAULT  13     // データ読み込み時のページフォルト

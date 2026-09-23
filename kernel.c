@@ -20,14 +20,31 @@ static void init_timer(void);
 static void init_process_management(void);
 static void create_user_processes(void);
 
-__attribute__((naked)) void user_entry(void) {
+/**
+ * @brief ユーザーモードへ落ちる入口
+ *
+ * プロセスが初めてスケジュールされたとき、switch_context() の ret から
+ * ここへ来る。起動引数を a0 に載せてから sret するので、ユーザー側の
+ * start() は a0 に触らずに main を呼ぶだけでよい。
+ *
+ * naked を外したのは、current_proc からの読み出しにコード生成が必要な
+ * ため。sret から先へは戻らないので、コンパイラが積むプロローグは
+ * 使われないまま放置される（カーネルスタックの先頭側に残るだけで、
+ * 次のトラップがその領域を上書きしても実害はない）。
+ */
+void user_entry(void) {
+    // ユーザーモードでの a0 の値。RISC-V の呼び出し規約により
+    // start() から呼ばれる main の第1引数になる
+    register uint32_t a0 __asm__("a0") = current_proc->arg;
+
     __asm__ __volatile__(
         "csrw sepc, %[sepc]\n"
         "csrw sstatus, %[sstatus]\n"
         "sret\n"
         :
         : [sepc] "r" (USER_BASE),
-          [sstatus] "r" (SSTATUS_SPIE)
+          [sstatus] "r" (SSTATUS_SPIE),
+          "r" (a0)
     );
 }
 
@@ -404,9 +421,12 @@ static void init_process_management(void) {
 static void create_user_processes(void) {
     // 同じイメージから2つのプロセスを作る。create_process2() が
     // プロセスごとに物理ページとページテーブルを用意するため、
-    // 両者のメモリ空間は完全に独立している
-    create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size);
-    create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size);
+    // 両者のメモリ空間は完全に独立している。
+    // 役割は起動引数で伝える。PID の採番に依存させないため
+    create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size,
+                    PROC_ARG_PRINTER);
+    create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size,
+                    PROC_ARG_CONSOLE);
 
     yield(); // ユーザープロセスに切り替え
 

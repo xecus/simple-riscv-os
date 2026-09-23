@@ -6,12 +6,6 @@ extern char __stack_top[];
 #define CONSOLE_BUF_SIZE     64   // 1行あたりの最大文字数（終端文字を含む）
 #define PRINTER_INTERVAL_SEC 3    // printer プロセスの出力間隔
 
-// 起動時に作られる2プロセスのPID。alloc_process() が pid = スロット番号 + 1 を
-// 振り、スロット0はアイドルプロセス（pid 0 に上書き）が使うため、
-// 1つ目のユーザープロセスが 2、2つ目が 3 になる
-#define PRINTER_PID 2
-#define CONSOLE_PID 3
-
 // 端末から送られてくる編集キー
 #define KEY_BACKSPACE 0x08
 #define KEY_DELETE    0x7f
@@ -356,12 +350,16 @@ static void run_printer(void) {
     }
 }
 
-void main(void) {
-    int pid = getpid();
-
-    // 同じイメージから2つのプロセスが起動するので、PID で役割を分ける
-    if (pid == CONSOLE_PID) {
-        run_console(pid);
+/**
+ * @brief ユーザープログラムの入口
+ * @param arg カーネルが渡した起動引数（PROC_ARG_PRINTER / PROC_ARG_CONSOLE）
+ *
+ * 同じイメージから2つのプロセスが起動するため、役割を引数で受け取って
+ * 分岐する。PID の採番に依存させないための作りにしている。
+ */
+void main(int arg) {
+    if (arg == PROC_ARG_CONSOLE) {
+        run_console(getpid());
         return;   // main から戻ると start() が exit() を呼ぶ
     }
 
@@ -371,8 +369,12 @@ void main(void) {
 __attribute__((section(".text.start")))
 __attribute__((naked))
 void start(void) {
+    // a0 にはカーネル（user_entry）が載せた起動引数が入っている。
+    // main の第1引数としてそのまま渡したいので、この関数では a0 に触れない。
+    // "r"(__stack_top) を使うと値を載せるレジスタに a0 が選ばれうるため、
+    // la 命令で sp へ直接読み込む（la は宛先レジスタしか使わない）
     __asm__ __volatile__(
-        "mv sp, %[stack_top]\n"
+        "la sp, __stack_top\n"
         "call main\n"
-        "call exit\n" ::[stack_top] "r"(__stack_top));
+        "call exit\n");
 }

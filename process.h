@@ -14,6 +14,7 @@ struct process {
     vaddr_t sp;          // コンテキストスイッチ時のスタックポインタ
     uint32_t *page_table;
     uint64_t wake_time;  // PROC_SLEEPING のときの起床時刻（time CSR の値）
+    uint32_t arg;        // ユーザープロセスへ渡す起動引数（a0 に載せる）
 
     // カーネルスタック。RISC-V の呼び出し規約はスタックポインタが16バイト
     // 境界にあることを要求する。スタック末尾をそのまま sp / sscratch に
@@ -28,7 +29,8 @@ extern struct process *current_proc;
 extern struct process *idle_proc;
 
 struct process *create_idle_process(void);
-struct process *create_process2(const void *image, size_t image_size);
+struct process *create_process2(const void *image, size_t image_size,
+                                uint32_t arg);
 
 void switch_context(uint32_t *prev_sp, uint32_t *next_sp);
 void yield(void);

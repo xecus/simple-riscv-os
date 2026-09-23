@@ -10,6 +10,11 @@
 #define SYS_GETPID  4
 #define SYS_EXIT    5
 
+// カーネルから main の第1引数として渡される起動引数。
+// kernel.h にも同じ値を定義してあるので、変更するときは両方を直すこと
+#define PROC_ARG_PRINTER 0
+#define PROC_ARG_CONSOLE 1
+
 // Core system functions
 __attribute__((noreturn)) void exit(void);
 int getchar(void);
