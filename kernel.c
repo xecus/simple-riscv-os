@@ -4,17 +4,21 @@
 #include "process.h"
 
 extern char __bss[], __bss_end[], __stack_top[];
-extern char _binary_shell_bin_start[], _binary_shell_bin_size[];
+// objcopy -Ibinary が作るシンボル。_binary_shell_bin_size も作られるが、
+// あれは「値がサイズ」の絶対シンボルで、アドレスとして参照すると
+// RV64 の PC 相対アドレッシング（-mcmodel=medany）では届かない。
+// サイズは start と end の差から求める
+extern char _binary_shell_bin_start[], _binary_shell_bin_end[];
 
 // Forward declarations for internal functions
-static void handle_page_fault(uint32_t fault_addr, uint32_t scause,
-                              uint32_t fault_pc);
+static void handle_page_fault(vaddr_t fault_addr, reg_t scause,
+                              reg_t fault_pc);
 static long syscall_getchar(void);
 static void syscall_sleep(uint32_t ms);
 static void block_current_process(uint32_t ms);
 static void syscall_exit(void);
 static void shutdown(void);
-static void handle_interrupt(uint32_t code);
+static void handle_interrupt(reg_t code);
 static void schedule_next_tick(void);
 static void init_timer(void);
 static void init_process_management(void);
@@ -51,7 +55,7 @@ void putchar(char ch) {
 void user_entry(void) {
     // ユーザーモードでの a0 の値。RISC-V の呼び出し規約により
     // start() から呼ばれる main の第1引数になる
-    register uint32_t a0 __asm__("a0") = current_proc->arg;
+    register reg_t a0 __asm__("a0") = current_proc->arg;
 
     __asm__ __volatile__(
         "csrw sepc, %[sepc]\n"
@@ -78,14 +82,14 @@ void user_entry(void) {
  */
 void handle_trap(struct trap_frame *f) {
     // RISC-V CSRから例外情報を取得
-    uint32_t scause = READ_CSR(scause);    // 例外原因
-    uint32_t stval = READ_CSR(stval);      // 例外に関連する値（アドレスなど）
-    uint32_t user_pc = READ_CSR(sepc);     // 例外発生時のPC
+    reg_t scause = READ_CSR(scause);    // 例外原因
+    reg_t stval = READ_CSR(stval);      // 例外に関連する値（アドレスなど）
+    reg_t user_pc = READ_CSR(sepc);     // 例外発生時のPC
 
     // sepc と sstatus はCSR、つまり全プロセス共通の1組しかない。
     // 処理中に yield() でプロセスが切り替わると別プロセスが書き換えてしまうため、
     // 自分のカーネルスタック上に退避しておき、復帰直前に書き戻す
-    uint32_t saved_sstatus = READ_CSR(sstatus);
+    reg_t saved_sstatus = READ_CSR(sstatus);
 
     if (scause & SCAUSE_INTERRUPT) {
         // 割り込み：例外と違い、復帰先のPCは進めずに中断した命令から再開する
@@ -111,7 +115,7 @@ void handle_trap(struct trap_frame *f) {
 
         default:
             // 未対応の例外：システムを停止
-            PANIC("Unexpected trap: scause=0x%x, stval=0x%x, sepc=0x%x",
+            PANIC("Unexpected trap: scause=0x%lx, stval=0x%lx, sepc=0x%lx",
                   scause, stval, user_pc);
     }
 
@@ -136,24 +140,24 @@ void handle_trap(struct trap_frame *f) {
  * カーネル領域への書き込みも「新しいページを割り当てて再実行」で
  * 黙って成功してしまい、メモリ保護が成立しなくなる。
  */
-static void handle_page_fault(uint32_t fault_addr, uint32_t scause,
-                              uint32_t fault_pc) {
+static void handle_page_fault(vaddr_t fault_addr, reg_t scause,
+                              reg_t fault_pc) {
     // sstatus.SPP が 1 なら、トラップ元はスーパーバイザモード。
     // カーネル自身のバグなので、ページを割り当てて隠蔽してはいけない
     if (READ_CSR(sstatus) & SSTATUS_SPP) {
-        PANIC("page fault in kernel mode: addr=0x%x scause=%d sepc=0x%x",
+        PANIC("page fault in kernel mode: addr=0x%lx scause=%d sepc=0x%lx",
               fault_addr, (int) scause, fault_pc);
     }
 
     // デマンドページングの対象はユーザー空間に限定する。
     // 範囲外へのアクセスは不正アクセスとして扱う
     if (fault_addr < USER_BASE || fault_addr >= USER_LIMIT) {
-        PANIC("invalid memory access by pid=%d: addr=0x%x scause=%d sepc=0x%x",
+        PANIC("invalid memory access by pid=%d: addr=0x%lx scause=%d sepc=0x%lx",
               current_proc->pid, fault_addr, (int) scause, fault_pc);
     }
 
     // ページ境界にアラインメント（4KB境界に切り下げ）
-    uint32_t vaddr = ALIGN_DOWN(fault_addr, PAGE_SIZE);
+    vaddr_t vaddr = ALIGN_DOWN(fault_addr, PAGE_SIZE);
 
     // 新しい物理ページを1つ割り当て
     paddr_t paddr = alloc_pages(1);
@@ -180,7 +184,7 @@ static void handle_page_fault(uint32_t fault_addr, uint32_t scause,
  * （ファイルアクセス、メモリ管理、I/Oなど）を安全に呼び出す仕組み
  */
 void handle_syscall(struct trap_frame *f) {
-    uint32_t syscall_num = f->a3;  // a3レジスタからシステムコール番号を取得
+    reg_t syscall_num = f->a3;  // a3レジスタからシステムコール番号を取得
 
     switch (syscall_num) {
         case SYS_PUTCHAR:
@@ -315,7 +319,7 @@ static void shutdown(void) {
  * @brief 割り込みを処理する
  * @param code 割り込みの種類（scause の最上位ビットを除いた値）
  */
-static void handle_interrupt(uint32_t code) {
+static void handle_interrupt(reg_t code) {
     if (code != SCAUSE_TIMER_INTERRUPT) {
         PANIC("Unexpected interrupt: code=%d", (int) code);
     }
@@ -341,9 +345,14 @@ static void handle_interrupt(uint32_t code) {
 static void schedule_next_tick(void) {
     uint64_t next = read_time() + TICK_INTERVAL_MS * TICKS_PER_MS;
 
+#if __riscv_xlen == 64
+    struct sbiret ret = sbi_call((long) next, 0, 0, 0, 0, 0,
+                                 SBI_FID_SET_TIMER, SBI_EID_TIME);
+#else
     struct sbiret ret = sbi_call((long) (uint32_t) next,
                                  (long) (uint32_t) (next >> 32),
                                  0, 0, 0, 0, SBI_FID_SET_TIMER, SBI_EID_TIME);
+#endif
 
     // 予約に失敗するとタイマ割り込みが二度と発生しない。sleep は
     // ポーリングを廃止しているため、誰もプロセスを起こせないまま
@@ -390,7 +399,9 @@ void kernel_main(void) {
     // なので kernel_entry がトラップフレームを不正なアドレスへ書き込む。
     // ファームウェアが sstatus.SIE や sie を 0 で渡す保証は無いため、
     // 前提に頼らずここで確定させる
-    WRITE_CSR(sstatus, READ_CSR(sstatus) & ~(uint32_t) SSTATUS_SIE);
+    // マスクはレジスタ幅で作る。32ビットで作ると RV64 では上位32ビット
+    // （UXL や SD）まで 0 で消してしまう
+    WRITE_CSR(sstatus, READ_CSR(sstatus) & ~(reg_t) SSTATUS_SIE);
     WRITE_CSR(sie, 0);
 
     // BSS領域をゼロで初期化（C言語の仕様により必要）
@@ -399,7 +410,7 @@ void kernel_main(void) {
     printf("RISC-V OS Starting...\n");
 
     // トラップベクタ設定：例外・割り込み時にkernel_entry関数を呼び出し
-    WRITE_CSR(stvec, (uint32_t)kernel_entry);
+    WRITE_CSR(stvec, (uintptr_t) kernel_entry);
 
     // プロセス管理システムの初期化
     init_process_management();
@@ -439,10 +450,9 @@ static void create_user_processes(void) {
     // プロセスごとに物理ページとページテーブルを用意するため、
     // 両者のメモリ空間は完全に独立している。
     // 役割は起動引数で伝える。PID の採番に依存させないため
-    create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size,
-                    PROC_ARG_PRINTER);
-    create_process2(_binary_shell_bin_start, (size_t)_binary_shell_bin_size,
-                    PROC_ARG_CONSOLE);
+    size_t shell_size = _binary_shell_bin_end - _binary_shell_bin_start;
+    create_process2(_binary_shell_bin_start, shell_size, PROC_ARG_PRINTER);
+    create_process2(_binary_shell_bin_start, shell_size, PROC_ARG_CONSOLE);
 
     yield(); // ユーザープロセスに切り替え
 

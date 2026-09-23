@@ -6,8 +6,9 @@ typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
 typedef unsigned long size_t;
-typedef uint32_t paddr_t;
-typedef uint32_t vaddr_t;
+typedef unsigned long uintptr_t;   // kernel.h と同じ定義にすること
+typedef uintptr_t paddr_t;
+typedef uintptr_t vaddr_t;
 
 #define PAGE_SIZE 4096
 

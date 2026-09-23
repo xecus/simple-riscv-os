@@ -183,9 +183,32 @@ static void test_printf_string_and_percent(void) {
     CHECK_STR(captured, "[abc][(null)] 100%");
 }
 
+static void test_printf_long(void) {
+    // %lx は long の幅で桁数が決まる（RV32 で8桁、RV64 で16桁）
+    capture_reset();
+    printf("%ld|%ld|%lx", 0L, -123456789L, 0x80200000UL);
+    CHECK_STR(captured, sizeof(long) == 8 ? "0|-123456789|0000000080200000"
+                                          : "0|-123456789|80200000");
+
+    // long の最小値と、上位ビットまで使う値
+    capture_reset();
+#if __riscv_xlen == 64
+    printf("%ld|%lx", -9223372036854775807L - 1, 0xfedcba9876543210UL);
+    CHECK_STR(captured, "-9223372036854775808|fedcba9876543210");
+#else
+    printf("%ld|%lx", -2147483647L - 1, 0xfedcba98UL);
+    CHECK_STR(captured, "-2147483648|fedcba98");
+#endif
+}
+
 static void test_printf_edge_cases(void) {
     // 関数ポインタ経由で呼び、コンパイル時の書式チェックを避ける
     void (*print)(const char *, ...) = printf;
+
+    // %l の後が途切れている場合は、そこまでをそのまま出す
+    capture_reset();
+    print("abc%l");
+    CHECK_STR(captured, "abc%l");
 
     // 書式文字列が % で終わる場合は % をそのまま出す
     capture_reset();
@@ -647,6 +670,7 @@ void run_all_tests(void) {
     RUN(test_printf_decimal);
     RUN(test_printf_hex);
     RUN(test_printf_string_and_percent);
+    RUN(test_printf_long);
     RUN(test_printf_edge_cases);
     RUN(test_memory_and_string_functions);
     RUN(test_alloc_pages);

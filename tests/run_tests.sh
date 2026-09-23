@@ -27,6 +27,10 @@ run_unit_image() {
             target=riscv32-unknown-elf
             qemu=(qemu-system-riscv32 -bios "$ROOT/opensbi-riscv32-generic-fw_dynamic.bin")
             ;;
+        rv64)
+            target=riscv64-unknown-elf
+            qemu=(qemu-system-riscv64 -bios default)
+            ;;
         *)
             echo "unknown ARCH: $arch" >&2
             return 1
@@ -35,7 +39,7 @@ run_unit_image() {
 
     mkdir -p "$out"
     echo "[BUILD] unit/$name ($arch)"
-    if ! $CC -std=c11 -O2 -g3 -Wall -Wextra --target=$target -fno-stack-protector \
+    if ! $CC -std=c11 -O2 -g3 -Wall -Wextra --target=$target -mcmodel=medany -fno-stack-protector \
             -ffreestanding -nostdlib -I"$ROOT" -I"$ROOT/tests/unit" \
             -Wl,-T"$ROOT/tests/unit/test.ld" -o "$elf" \
             "$ROOT/tests/unit/harness.c" "$ROOT/sbi.c" "$@"; then

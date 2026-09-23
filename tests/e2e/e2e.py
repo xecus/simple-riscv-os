@@ -39,7 +39,9 @@ def qemu_command(kernel):
 def build(name, user_main):
     out = os.path.join(BUILD, name)
     env = dict(os.environ, ARCH=ARCH, OUT=out, USER_MAIN=user_main)
-    subprocess.run(["bash", os.path.join(ROOT, "build.sh")], env=env, check=True)
+    result = subprocess.run(["bash", os.path.join(ROOT, "build.sh")], env=env)
+    if result.returncode != 0:
+        raise Failure("build failed (USER_MAIN=%s)" % user_main)
     return os.path.join(out, "kernel.elf")
 
 

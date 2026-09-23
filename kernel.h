@@ -2,8 +2,9 @@
  * @file kernel.h  
  * @brief Core kernel definitions and structures for RISC-V OS
  * 
- * このファイルは、RISC-V 32ビットアーキテクチャ用のシンプルなOSカーネルの
- * 中核となる定数、構造体、関数宣言を定義します。
+ * このファイルは、RISC-V 用のシンプルなOSカーネルの中核となる定数、
+ * 構造体、関数宣言を定義します。RV32 と RV64 のどちらでもビルドできるよう、
+ * レジスタ幅に依存する部分は reg_t / uintptr_t と __riscv_xlen で書き分けます。
  * 
  * 主要な機能：
  * - メモリ管理（仮想メモリ、ページング）
@@ -18,8 +19,14 @@ typedef unsigned int uint32_t;         // 32ビット符号なし整数
 typedef unsigned long size_t;          // サイズを表す型
 typedef unsigned char uint8_t;         // 8ビット符号なし整数  
 typedef unsigned long long uint64_t;   // 64ビット符号なし整数
-typedef uint32_t paddr_t;              // 物理アドレス型
-typedef uint32_t vaddr_t;              // 仮想アドレス型
+
+// RISC-V の ILP32 / LP64 のどちらでも long はポインタ・汎用レジスタと同じ幅
+// （RV32 で32ビット、RV64 で64ビット）になる。アドレスやレジスタの値を
+// uint32_t で持つと RV64 で上位ビットが落ちるため、必ずこれらを使う
+typedef unsigned long uintptr_t;       // ポインタと同じ幅の整数
+typedef unsigned long reg_t;           // 汎用レジスタ・CSR と同じ幅の整数
+typedef uintptr_t paddr_t;             // 物理アドレス型
+typedef uintptr_t vaddr_t;             // 仮想アドレス型
 
 #define NULL ((void *)0)
 
@@ -43,9 +50,9 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
 // 例外原因コード（RISC-V仕様で定義されている値）
 #define SCAUSE_ECALL    8              // ユーザーモードからのシステムコール
 
-// scause の最上位ビットが立っていれば例外ではなく割り込み。
-// 残りのビットが割り込みの種類を表す
-#define SCAUSE_INTERRUPT        0x80000000u
+// scause の最上位ビット（RV32 ならビット31、RV64 ならビット63）が
+// 立っていれば例外ではなく割り込み。残りのビットが割り込みの種類を表す
+#define SCAUSE_INTERRUPT        (1UL << (__riscv_xlen - 1))
 #define SCAUSE_TIMER_INTERRUPT  5      // スーパーバイザタイマ割り込み
 
 // システムコール番号（このOSで独自に定義）
@@ -82,7 +89,8 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
 // 実行中のプロセスから強制的にCPUを取り上げる
 #define TICK_INTERVAL_MS    10
 
-// SBI Timer 拡張（経過時間の通知に使う）
+// SBI Timer 拡張（経過時間の通知に使う）。
+// RV32 では64ビットの時刻を2つの引数（下位・上位）に分けて渡す
 #define SBI_EID_TIME        0x54494D45  // "TIME"
 #define SBI_FID_SET_TIMER   0
 
@@ -99,9 +107,10 @@ struct sbiret {
 };
 
 // トラップフレーム：例外発生時にCPUレジスタを保存する構造体
-// RISC-V レジスタセット（exception.cの保存順序と一致）
+// RISC-V レジスタセット（exception.cの保存順序と一致）。
+// 各要素はレジスタ幅（RV32 で4バイト、RV64 で8バイト）
 struct trap_frame {
-    uint32_t ra, gp, tp, t0, t1, t2, t3, t4, t5, t6, a0, a1, a2, a3, a4, a5, a6, a7,
+    reg_t ra, gp, tp, t0, t1, t2, t3, t4, t5, t6, a0, a1, a2, a3, a4, a5, a6, a7,
              s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, sp;
 };
 
@@ -128,19 +137,35 @@ void printf(const char *format, ...) __attribute__((format(printf, 1, 2)));
 void *memset(void *buf, char c, size_t n);
 void handle_syscall(struct trap_frame *f);
 
+// アセンブリの中でレジスタ幅のロード・ストアを書くための命令名と幅
+#if __riscv_xlen == 32
+#define REG_L    "lw"
+#define REG_S    "sw"
+#define REG_SIZE "4"
+#else
+#define REG_L    "ld"
+#define REG_S    "sd"
+#define REG_SIZE "8"
+#endif
+
 // 値が指定されたアライメント境界に整列しているかチェック
-static inline int is_aligned(uint32_t value, uint32_t alignment) {
+static inline int is_aligned(uintptr_t value, uintptr_t alignment) {
     return (value & (alignment - 1)) == 0;
 }
 
 /**
  * @brief 64ビットのタイマカウンタを読む
  *
+ * RV64 では time CSR 1つで64ビット全体が読める。
+ *
  * RV32 では time CSR が下位32ビット、timeh が上位32ビットに分かれている。
  * 下位を読んだ直後に桁上がりが起きると値が壊れるため、
  * 上位を読み直して一致するまでやり直す。
  */
 static inline uint64_t read_time(void) {
+#if __riscv_xlen == 64
+    return READ_CSR(time);
+#else
     uint32_t hi, lo, hi_again;
 
     do {
@@ -150,6 +175,7 @@ static inline uint64_t read_time(void) {
     } while (hi != hi_again);
 
     return ((uint64_t) hi << 32) | lo;
+#endif
 }
 
 // パニック：回復不能なエラーが発生した時にシステムを停止
