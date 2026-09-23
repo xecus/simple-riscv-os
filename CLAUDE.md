@@ -56,6 +56,12 @@ E2E テスト（tests/e2e/、実際の OS をシリアル経由で操作）を�
 - ページサイズは4KB固定
 - 仮想アドレス空間は16MBから開始
 
+### プラットフォーム
+- QEMU virt と実機で異なる値は platform/<名前>/ に置き、共通コードで #ifdef しない
+- 新しい値を足すときは、全プラットフォームの platform.h / platform.ld に揃えて定義する
+- milkv-duo の値は実機で未確認（各ファイルの【要確認】を参照）
+- コンパイルフラグは build.sh、run.ps1、tests/run_tests.sh の3か所で揃える
+
 ### RISC-V固有の実装
 - CSR（Control and Status Register）の適切な使用
 - ecall命令によるシステムコール

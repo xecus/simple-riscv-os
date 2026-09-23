@@ -32,6 +32,27 @@ Windows（PowerShell または cmd から実行すること）:
 - QEMUでRISC-V仮想マシンを起動
 - カーネルとユーザープログラムを実行
 
+### プラットフォームの切り替え
+
+QEMU virt と実機で異なる値（タイマ周波数、物理メモリの範囲、PTE の
+メモリ属性）は `platform/<名前>/` に分けてあり、`PLATFORM` 環境変数で選びます。
+既定は `qemu-virt` です。
+
+```bash
+PLATFORM=milkv-duo ./build.sh     # Milk-V Duo 向けにビルドだけ行う
+```
+
+| PLATFORM | 対象 | 状態 |
+|---|---|---|
+| `qemu-virt` | QEMU の virt マシン | 動作確認済み。`run.sh` / `run.ps1` はこれ専用 |
+| `milkv-duo` | Milk-V Duo（CV1800B、64MB） | ビルドのみ確認。値は公開資料に基づき、実機では未確認 |
+
+`milkv-duo` 向けのカーネルは QEMU の `-cpu thead-c906` でも動きません。
+T-Head C906 独自のメモリ属性ビット（MAEE）を PTE に立てているためで、
+QEMU はこれを予約ビットとして扱い、ページテーブルを有効にした直後に
+命令ページフォルトが無限に続いて無言で止まります。実機でファームウェアが
+MAEE を有効にしていない場合も同じ症状になります。
+
 ## テスト
 
 Linux / WSL（python3 が必要）:
@@ -47,6 +68,8 @@ tests/run_tests.sh
   レジスタ退避、readline、疑似コンソールを対象とする
 - **E2E テスト**（`tests/e2e/`）: 実際の OS を起動してシリアル経由で操作し、
   コンソールの応答、printer の周期、プロセス終了と自動シャットダウンを確かめる
+- **プラットフォームのビルド確認**: QEMU で動かせない `milkv-duo` 向けに、
+  リンクが通ることと空き RAM の終端が期待どおりであることを確かめる
 
 ## ファイル構成と役割
 
@@ -168,7 +191,8 @@ tests/run_tests.sh
 - **機能**:
   - Clangでのクロスコンパイル
   - リンカスクリプトを使用したメモリレイアウト制御
-  - 環境変数 OUT で出力先、USER_MAIN でユーザープログラムを切り替えられる
+  - 環境変数 OUT で出力先、USER_MAIN でユーザープログラム、PLATFORM で
+    対象プラットフォームを切り替えられる
 
 #### `run.sh`
 - **役割**: ビルド・実行スクリプト
@@ -186,6 +210,15 @@ tests/run_tests.sh
 - **機能**:
   - メモリセクション配置
   - シンボル定義（__kernel_base等）
+  - 空き RAM の終端をプラットフォームの platform.ld から読み、
+    物理メモリを超えないことをリンク時に確かめる
+
+#### `platform/<名前>/`
+- **役割**: プラットフォームごとに異なる値の置き場所
+- **内容**:
+  - `platform.h`: PLATFORM_NAME、TIMER_FREQ_HZ、PTE_ATTR_NORMAL_MEM
+  - `platform.ld`: RAM_END、FREE_RAM_END
+  - 共通コードは #ifdef で分岐せず、build.sh が検索パス（-I と -L）で読み分ける
 
 #### `.gitignore`
 - **役割**: Gitで無視するファイル指定
@@ -267,7 +300,7 @@ tests/run_tests.sh
 - **特権レベル**: User mode (U) + Supervisor mode (S)  
 - **ページサイズ**: 4KB
 - **ユーザー空間**: 0x1000000 (16MB) 〜 0x1800000 (24MB)
-- **最大メモリ**: 64MB
+- **空き RAM**: カーネルの直後から platform.ld の FREE_RAM_END まで（qemu-virt では約64MB）
 - **タイムスライス**: 10ms（タイマ割り込みの間隔）
 - **最大プロセス数**: 8（アイドルプロセスを含む）
 - **ページテーブル**: カーネル領域のマッピングは全プロセスで共有（プロセスごとに複製するのはルートテーブルの1ページだけで、下位の段は共有する）

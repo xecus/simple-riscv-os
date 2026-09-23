@@ -9,6 +9,7 @@ set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CLANG=${CLANG:-clang}   # build.sh と同じく、一般的な CC は読まない
+LLVM_NM=${LLVM_NM:-llvm-nm}
 
 FAILED=0
 
@@ -48,6 +49,30 @@ run_unit_image test_kernel "$ROOT/tests/unit/test_kernel.c" \
 
 run_unit_image test_user "$ROOT/tests/unit/test_user.c" \
     || FAILED=1
+
+# QEMU では動かせないプラットフォーム向けのビルドを確かめる。
+# 実行はできないので、リンクが通ること（kernel.ld の ASSERT を含む）と、
+# 空き RAM の終端が platform.ld の値になっていることだけを見る
+check_platform_build() {
+    local platform=$1 expected_free_ram_end=$2
+    local out="$ROOT/build/$platform"
+
+    echo "[BUILD] platform/$platform"
+    if ! PLATFORM=$platform OUT=$out bash "$ROOT/build.sh"; then
+        echo "[FAIL] platform/$platform: build failed"
+        return 1
+    fi
+
+    local actual
+    actual=$($LLVM_NM "$out/kernel.elf" | awk '$3 == "__free_ram_end" { print $1 }')
+    if [ "$actual" != "$expected_free_ram_end" ]; then
+        echo "[FAIL] platform/$platform: __free_ram_end is '$actual', expected $expected_free_ram_end"
+        return 1
+    fi
+    echo "[ OK ] platform/$platform"
+}
+
+check_platform_build milkv-duo 0000000083f00000 || FAILED=1
 
 python3 "$ROOT/tests/e2e/e2e.py" || FAILED=1
 
