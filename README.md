@@ -15,6 +15,21 @@ riscv64 用の OpenSBI（ファームウェア）は QEMU に同梱されてい�
 
 ## ビルドと実行
 
+対象のプラットフォームは環境変数 `PLATFORM` で選びます。省略すると `qemu-virt` になります。
+プラットフォームごとに異なる値（タイマ周波数、物理メモリの範囲、PTE のメモリ属性）は
+`platform/<名前>/` にまとめてあります。
+
+| PLATFORM | 対象 | QEMU での実行 | 状態 |
+|---|---|---|---|
+| `qemu-virt` | QEMU の virt マシン | できる | 動作確認済み |
+| `qemu-c906` | QEMU の virt マシン + T-Head C906 の CPU モデル + 64MB | できる | 動作確認済み |
+| `milkv-duo` | Milk-V Duo（CV1800B、64MB） | できない | ビルドのみ確認。値は公開資料に基づき、実機では未確認 |
+
+`run.sh` と `run.ps1` は、ビルドしてから QEMU を起動します。QEMU を終了するには
+`Ctrl-A` を押してから `X` を押します。
+
+### qemu-virt
+
 Linux / WSL:
 
 ```bash
@@ -27,43 +42,75 @@ Windows（PowerShell または cmd から実行すること）:
 .\run.ps1
 ```
 
-これらのスクリプトは以下を実行します：
-- ClangとLLVMを使用してクロスコンパイル
-- QEMUでRISC-V仮想マシンを起動
-- カーネルとユーザープログラムを実行
+### qemu-c906
 
-### プラットフォームの切り替え
+Milk-V Duo の CPU と DRAM 容量に寄せた QEMU で動かします。
 
-QEMU virt と実機で異なる値（タイマ周波数、物理メモリの範囲、PTE の
-メモリ属性）は `platform/<名前>/` に分けてあり、`PLATFORM` 環境変数で選びます。
-既定は `qemu-virt` です。
+Linux / WSL:
 
 ```bash
-PLATFORM=qemu-c906 ./run.sh       # Duo の CPU とメモリ容量に寄せた QEMU で実行する
-PLATFORM=milkv-duo ./build.sh     # Milk-V Duo 向けにビルドだけ行う
+PLATFORM=qemu-c906 ./run.sh
 ```
 
-| PLATFORM | 対象 | 状態 |
-|---|---|---|
-| `qemu-virt` | QEMU の virt マシン | 動作確認済み |
-| `qemu-c906` | QEMU の virt マシン + T-Head C906 の CPU モデル + 64MB | 動作確認済み |
-| `milkv-duo` | Milk-V Duo（CV1800B、64MB） | ビルドのみ確認。値は公開資料に基づき、実機では未確認 |
+Windows（PowerShell）:
 
-`run.sh` と `run.ps1` で実行できるのは、`platform/<名前>/qemu.args` がある
-プラットフォームだけです。このファイルに QEMU の追加オプションを書きます。
+```powershell
+$env:PLATFORM = 'qemu-c906'
+.\run.ps1
+Remove-Item Env:PLATFORM   # 環境変数はセッション中残るので、終わったら消す
+```
+
+起動時に次の警告が出ますが、QEMU の C906 モデルに由来するもので動作には影響しません。
+
+```
+qemu-system-riscv64: warning: disabling zfa extension for hart 0x0000000000000000 because privilege spec version does not match
+```
 
 `qemu-c906` は Milk-V Duo そのものではなく、Duo の CPU と DRAM 容量に寄せた
 QEMU です。C906 の CPU モデルと 64MB の構成で動くことを確かめられますが、
 次の2点は `milkv-duo` と異なり、実機でしか確かめられません。
 
 - タイマ周波数は QEMU の 10MHz を使う（Duo は 25MHz）
-- PTE のメモリ属性ビットを立てない（理由は次の段落）
+- PTE のメモリ属性ビットを立てない（理由は次の節）
+
+### milkv-duo
+
+ビルドだけを行います。成果物がリポジトリ直下の QEMU 向けのものと混ざらないよう、
+`OUT` で出力先を分けることを勧めます。Windows では WSL から実行してください
+（`run.ps1` は QEMU で動かせるプラットフォーム専用です）。
+
+```bash
+PLATFORM=milkv-duo OUT=build/milkv-duo ./build.sh
+# → build/milkv-duo/kernel.elf
+```
+
+実機へ書き込んで起動する手順は、まだ整備していません。
 
 `milkv-duo` 向けのカーネルは QEMU の `-cpu thead-c906` でも動きません。
 T-Head C906 独自のメモリ属性ビット（MAEE）を PTE に立てているためで、
 QEMU はこれを予約ビットとして扱い、ページテーブルを有効にした直後に
 命令ページフォルトが無限に続いて無言で止まります。実機でファームウェアが
 MAEE を有効にしていない場合も同じ症状になります。
+
+### ビルドだけ行う、QEMU を手で起動する
+
+`build.sh` はビルドだけを行います。次の環境変数で動作を切り替えられます。
+
+| 環境変数 | 意味 | 既定値 |
+|---|---|---|
+| `PLATFORM` | 対象のプラットフォーム | `qemu-virt` |
+| `OUT` | 成果物の出力先 | リポジトリ直下 |
+| `USER_MAIN` | ユーザープログラムの main を含むソース | `user.c` |
+
+QEMU を手で起動するときは、`platform/<名前>/qemu.args` に書かれた追加オプションを
+`-machine virt` の後に付けます。このファイルがあるプラットフォームだけが QEMU で
+実行できます。qemu-c906 の例:
+
+```bash
+PLATFORM=qemu-c906 OUT=build/qemu-c906 ./build.sh
+qemu-system-riscv64 -machine virt -cpu thead-c906 -m 64M -bios default \
+    -nographic -serial mon:stdio --no-reboot -kernel build/qemu-c906/kernel.elf
+```
 
 ## テスト
 
