@@ -1,18 +1,17 @@
 # RISC-V OS Implementation
 
-RISC-V 32ビットアーキテクチャ向けのシンプルなオペレーティングシステムの実装です。
+RISC-V 64ビットアーキテクチャ（RV64）向けのシンプルなオペレーティングシステムの実装です。
+当初は RV32 向けに書かれており、将来の実機（Milk-V など）への移植を見据えて RV64 へ移行しました。
 
 参考：https://operating-system-in-1000-lines.vercel.app/ja/
 
 ## 開発環境の設定
 
 ```bash
-sudo apt update && sudo apt install -y clang llvm lld qemu-system-riscv32 curl
+sudo apt update && sudo apt install -y clang llvm lld qemu-system-riscv64 python3
 ```
 
-```bash
-curl -LO https://github.com/qemu/qemu/raw/v8.0.4/pc-bios/opensbi-riscv32-generic-fw_dynamic.bin
-```
+riscv64 用の OpenSBI（ファームウェア）は QEMU に同梱されているため、別途の取得は不要です。
 
 ## ビルドと実行
 
@@ -56,7 +55,7 @@ tests/run_tests.sh
 #### `kernel.h`
 - **役割**: カーネルの中核定数・構造体・関数宣言を定義
 - **内容**: 
-  - 基本型定義（uint32_t、size_t等）
+  - 基本型定義（uint32_t、size_t、アドレス用の uintptr_t、レジスタ幅の reg_t 等）
   - メモリレイアウト定数（PAGE_SIZE、USER_BASE）
   - RISC-V CSR操作マクロ
   - 例外・システムコール番号定義
@@ -96,7 +95,7 @@ tests/run_tests.sh
 - **役割**: メモリ管理機能の実装
 - **機能**:
   - 物理メモリページ割り当て（バンプアロケータ方式。解放は未実装）
-  - Sv32 2段ページテーブルの操作
+  - Sv39 3段ページテーブルの操作
 
 ### ユーザー空間ファイル
 
@@ -152,7 +151,7 @@ tests/run_tests.sh
 #### `common.c`
 - **役割**: 共通ユーティリティ関数の実装
 - **機能**:
-  - カーネル用printf
+  - カーネル用printf（%d %x %s %% に加え、64ビット値用の %ld %lx）
   - メモリ操作（memset、memcpy）
   - 文字列操作
 
@@ -180,7 +179,7 @@ tests/run_tests.sh
 - **役割**: Windowsネイティブ用のビルド・実行スクリプト（run.shのPowerShell版）
 - **機能**:
   - PATH上のLLVM/QEMUを自動検出
-  - `-fuse-ld=lld` でLLDを明示指定（Windowsにriscv32向けGNU ldが無いため）
+  - `-fuse-ld=lld` でLLDを明示指定（Windowsにriscv64向けGNU ldが無いため）
 
 #### `kernel.ld`
 - **役割**: カーネル用リンカスクリプト
@@ -262,12 +261,13 @@ tests/run_tests.sh
 
 ## 技術仕様
 
-- **アーキテクチャ**: RISC-V 32ビット
-- **仮想メモリ**: Sv32（4KB ページング）
+- **アーキテクチャ**: RISC-V 64ビット（RV64IMAC、LP64）
+- **仮想メモリ**: Sv39（3段、4KB ページング）
+- **コードモデル**: medany（カーネルを 0x80200000 に置くため。medlow では符号拡張で壊れる）
 - **特権レベル**: User mode (U) + Supervisor mode (S)  
 - **ページサイズ**: 4KB
 - **ユーザー空間**: 0x1000000 (16MB) 〜 0x1800000 (24MB)
 - **最大メモリ**: 64MB
 - **タイムスライス**: 10ms（タイマ割り込みの間隔）
 - **最大プロセス数**: 8（アイドルプロセスを含む）
-- **ページテーブル**: カーネル領域のマッピングは全プロセスで共有（1プロセスあたり1ページ）
+- **ページテーブル**: カーネル領域のマッピングは全プロセスで共有（プロセスごとに複製するのはルートテーブルの1ページだけで、下位の段は共有する）

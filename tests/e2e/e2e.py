@@ -6,7 +6,7 @@ E2E テスト: 実際にビルドした OS を QEMU で起動し、シリアル�
 システムコール、タイマ割り込み、プロセス切り替えがつながった状態で、
 利用者から見える振る舞いが変わっていないことを確かめる。
 
-使い方: ARCH=rv32 python3 tests/e2e/e2e.py
+使い方: python3 tests/e2e/e2e.py
 """
 import os
 import re
@@ -16,29 +16,21 @@ import threading
 import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-ARCH = os.environ.get("ARCH", "rv32")
-BUILD = os.path.join(ROOT, "build", "e2e-" + ARCH)
+BUILD = os.path.join(ROOT, "build", "e2e")
 
 PRINTER_INTERVAL = 3.0   # user.c の PRINTER_INTERVAL_SEC
 
 
 def qemu_command(kernel):
     # tests/run_tests.sh の QEMU 設定と揃えること
-    if ARCH == "rv32":
-        qemu = ["qemu-system-riscv32", "-bios",
-                os.path.join(ROOT, "opensbi-riscv32-generic-fw_dynamic.bin")]
-    elif ARCH == "rv64":
-        qemu = ["qemu-system-riscv64", "-bios", "default"]
-    else:
-        raise SystemExit("unknown ARCH: " + ARCH)
-
-    return qemu + ["-machine", "virt", "-nographic", "-serial", "stdio",
-                   "-monitor", "none", "--no-reboot", "-kernel", kernel]
+    return ["qemu-system-riscv64", "-machine", "virt", "-bios", "default",
+            "-nographic", "-serial", "stdio", "-monitor", "none", "--no-reboot",
+            "-kernel", kernel]
 
 
 def build(name, user_main):
     out = os.path.join(BUILD, name)
-    env = dict(os.environ, ARCH=ARCH, OUT=out, USER_MAIN=user_main)
+    env = dict(os.environ, OUT=out, USER_MAIN=user_main)
     result = subprocess.run(["bash", os.path.join(ROOT, "build.sh")], env=env)
     if result.returncode != 0:
         raise Failure("build failed (USER_MAIN=%s)" % user_main)
@@ -224,7 +216,7 @@ def main():
     failed = 0
     for scenario in SCENARIOS:
         name = scenario.__name__
-        print("[RUN ] e2e/%s (%s)" % (name, ARCH), flush=True)
+        print("[RUN ] e2e/%s" % name, flush=True)
         started = time.monotonic()
         try:
             scenario()

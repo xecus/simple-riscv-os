@@ -8,8 +8,10 @@
  *
  * 期待値はできるだけ実装ではなく仕様から書く。たとえばページテーブルは
  * RISC-V 特権仕様どおりに自前で辿り（spec_walk）、さらに satp を実際に
- * 有効にして CPU 自身に変換させる。RV32（Sv32）と RV64（Sv39）で
- * 同じテストが通れば、移行前後で挙動が変わっていないと言える。
+ * 有効にして CPU 自身に変換させる。
+ *
+ * これらのテストは RV32（Sv32）時代に書き、同じテストが RV64（Sv39）でも
+ * 通ることを移行の合格条件にした。
  */
 #include "kernel.h"
 #include "common.h"
@@ -21,16 +23,10 @@
 extern char __kernel_base[], __free_ram[], __free_ram_end[];
 extern struct process procs[PROCS_MAX];
 
-// RISC-V 特権仕様のページテーブル形式。実装側の定数は使わない
-#if __riscv_xlen == 32
-#define SPEC_LEVELS    2     // Sv32: 2段
-#define SPEC_VPN_BITS  10    // 1段あたり 1024 エントリ
-#define SPEC_SATP_MODE (1UL << 31)   // satp.MODE = 1 (Sv32)
-#else
-#define SPEC_LEVELS    3     // Sv39: 3段
-#define SPEC_VPN_BITS  9     // 1段あたり 512 エントリ
+// RISC-V 特権仕様のページテーブル形式（Sv39）。実装側の定数は使わない
+#define SPEC_LEVELS    3             // 3段
+#define SPEC_VPN_BITS  9             // 1段あたり 512 エントリ
 #define SPEC_SATP_MODE (8UL << 60)   // satp.MODE = 8 (Sv39)
-#endif
 
 #define SPEC_V 0x01
 #define SPEC_R 0x02
@@ -184,21 +180,15 @@ static void test_printf_string_and_percent(void) {
 }
 
 static void test_printf_long(void) {
-    // %lx は long の幅で桁数が決まる（RV32 で8桁、RV64 で16桁）
+    // %lx は16桁固定
     capture_reset();
     printf("%ld|%ld|%lx", 0L, -123456789L, 0x80200000UL);
-    CHECK_STR(captured, sizeof(long) == 8 ? "0|-123456789|0000000080200000"
-                                          : "0|-123456789|80200000");
+    CHECK_STR(captured, "0|-123456789|0000000080200000");
 
     // long の最小値と、上位ビットまで使う値
     capture_reset();
-#if __riscv_xlen == 64
     printf("%ld|%lx", -9223372036854775807L - 1, 0xfedcba9876543210UL);
     CHECK_STR(captured, "-9223372036854775808|fedcba9876543210");
-#else
-    printf("%ld|%lx", -2147483647L - 1, 0xfedcba98UL);
-    CHECK_STR(captured, "-2147483648|fedcba98");
-#endif
 }
 
 static void test_printf_edge_cases(void) {
@@ -548,13 +538,9 @@ static void test_yield_round_robin(void) {
 // exception.c: kernel_entry
 // ---------------------------------------------------------------------------
 
-#if __riscv_xlen == 64
+// asm 内のストア命令と1要素の大きさ
 #define T_SREG "sd"
 #define T_WORD "8"
-#else
-#define T_SREG "sw"
-#define T_WORD "4"
-#endif
 
 // asm 内で使う out[] の添字
 #define OUT_A0     0    // a0-a7: 0-7

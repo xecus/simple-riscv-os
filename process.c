@@ -19,40 +19,40 @@ static void idle_entry(void);
 __attribute__((naked)) void switch_context(vaddr_t *prev_sp,
                                            vaddr_t *next_sp) {
     __asm__ __volatile__(
-        // 実行中プロセスのスタックへレジスタを保存（レジスタ幅は kernel.h の REG_*）
-        "addi sp, sp, -13 * " REG_SIZE "\n"
-        REG_S " ra,  " REG_SIZE " * 0(sp)\n"
-        REG_S " s0,  " REG_SIZE " * 1(sp)\n"
-        REG_S " s1,  " REG_SIZE " * 2(sp)\n"
-        REG_S " s2,  " REG_SIZE " * 3(sp)\n"
-        REG_S " s3,  " REG_SIZE " * 4(sp)\n"
-        REG_S " s4,  " REG_SIZE " * 5(sp)\n"
-        REG_S " s5,  " REG_SIZE " * 6(sp)\n"
-        REG_S " s6,  " REG_SIZE " * 7(sp)\n"
-        REG_S " s7,  " REG_SIZE " * 8(sp)\n"
-        REG_S " s8,  " REG_SIZE " * 9(sp)\n"
-        REG_S " s9,  " REG_SIZE " * 10(sp)\n"
-        REG_S " s10, " REG_SIZE " * 11(sp)\n"
-        REG_S " s11, " REG_SIZE " * 12(sp)\n"
+        // 実行中プロセスのスタックへレジスタを保存（64ビットなので8バイトずつ）
+        "addi sp, sp, -13 * 8\n"
+        "sd ra,  0  * 8(sp)\n"
+        "sd s0,  1  * 8(sp)\n"
+        "sd s1,  2  * 8(sp)\n"
+        "sd s2,  3  * 8(sp)\n"
+        "sd s3,  4  * 8(sp)\n"
+        "sd s4,  5  * 8(sp)\n"
+        "sd s5,  6  * 8(sp)\n"
+        "sd s6,  7  * 8(sp)\n"
+        "sd s7,  8  * 8(sp)\n"
+        "sd s8,  9  * 8(sp)\n"
+        "sd s9,  10 * 8(sp)\n"
+        "sd s10, 11 * 8(sp)\n"
+        "sd s11, 12 * 8(sp)\n"
         // スタックポインタの切り替え
-        REG_S " sp, (a0)\n"
-        REG_L " sp, (a1)\n"
+        "sd sp, (a0)\n"
+        "ld sp, (a1)\n"
 
         // 次のプロセスのスタックからレジスタを復元
-        REG_L " ra,  " REG_SIZE " * 0(sp)\n"
-        REG_L " s0,  " REG_SIZE " * 1(sp)\n"
-        REG_L " s1,  " REG_SIZE " * 2(sp)\n"
-        REG_L " s2,  " REG_SIZE " * 3(sp)\n"
-        REG_L " s3,  " REG_SIZE " * 4(sp)\n"
-        REG_L " s4,  " REG_SIZE " * 5(sp)\n"
-        REG_L " s5,  " REG_SIZE " * 6(sp)\n"
-        REG_L " s6,  " REG_SIZE " * 7(sp)\n"
-        REG_L " s7,  " REG_SIZE " * 8(sp)\n"
-        REG_L " s8,  " REG_SIZE " * 9(sp)\n"
-        REG_L " s9,  " REG_SIZE " * 10(sp)\n"
-        REG_L " s10, " REG_SIZE " * 11(sp)\n"
-        REG_L " s11, " REG_SIZE " * 12(sp)\n"
-        "addi sp, sp, 13 * " REG_SIZE "\n"
+        "ld ra,  0  * 8(sp)\n"
+        "ld s0,  1  * 8(sp)\n"
+        "ld s1,  2  * 8(sp)\n"
+        "ld s2,  3  * 8(sp)\n"
+        "ld s3,  4  * 8(sp)\n"
+        "ld s4,  5  * 8(sp)\n"
+        "ld s5,  6  * 8(sp)\n"
+        "ld s6,  7  * 8(sp)\n"
+        "ld s7,  8  * 8(sp)\n"
+        "ld s8,  9  * 8(sp)\n"
+        "ld s9,  10 * 8(sp)\n"
+        "ld s10, 11 * 8(sp)\n"
+        "ld s11, 12 * 8(sp)\n"
+        "addi sp, sp, 13 * 8\n"
         "ret\n"
     );
 }
@@ -115,7 +115,7 @@ static struct process *alloc_process(uintptr_t entry) {
         PANIC("no free process slots");
 
     // switch_context() で復帰できるように、RISC-V呼び出し先保存レジスタを積む。
-    // 1つの要素はレジスタ幅（switch_context の REG_L / REG_S と揃える）
+    // 1つの要素はレジスタ幅（8バイト。switch_context の sd / ld と揃える）
     reg_t *sp = (reg_t *) &proc->stack[sizeof(proc->stack)];
     *--sp = 0;                      // s11
     *--sp = 0;                      // s10

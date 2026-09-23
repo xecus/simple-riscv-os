@@ -1,21 +1,14 @@
 #pragma once
 #include "kernel.h"
 
-// ページテーブルの形式。RV32 は Sv32（2段）、RV64 は Sv39（3段）を使う。
-// どちらも1つのテーブルがちょうど1ページ（4KB）に収まり、PTE の下位10ビットが
-// フラグ、その上が物理ページ番号（PPN）という並びは共通である
-#if __riscv_xlen == 32
-#define SATP_MODE      (1UL << 31)   // satp.MODE = 1: Sv32
-#define PT_LEVELS      2             // テーブルの段数
-#define PT_INDEX_BITS  10            // 1段あたりの添字のビット数（1024 エントリ x 4バイト）
-#else
+// ページテーブルの形式は Sv39（3段）。1つのテーブルは 512 エントリ x 8バイトで
+// ちょうど1ページ（4KB）に収まる。PTE の下位10ビットがフラグ、
+// その上が物理ページ番号（PPN）
 #define SATP_MODE      (8UL << 60)   // satp.MODE = 8: Sv39
-#define PT_LEVELS      3
-#define PT_INDEX_BITS  9             // 512 エントリ x 8バイト
-#endif
+#define PT_LEVELS      3             // テーブルの段数
+#define PT_INDEX_BITS  9             // 1段あたりの添字のビット数
 
-// PTE はレジスタと同じ幅（Sv32 で4バイト、Sv39 で8バイト）
-typedef reg_t pte_t;
+typedef reg_t pte_t;                 // PTE は64ビット
 
 #define PTE_PPN_SHIFT 10             // PTE 内で PPN が始まるビット位置
 

@@ -33,10 +33,9 @@ static uintptr_t pt_index(vaddr_t vaddr, int level) {
  * @brief ページテーブルに vaddr -> paddr のマッピングを作る
  * @param root ルート（最上段）ページテーブルの先頭アドレス
  *
- * 仮想アドレスは上から順に各段の添字と、ページ内オフセット(12bit)に分割される。
- * - Sv32: VPN[1](10bit) / VPN[0](10bit) / offset
- * - Sv39: VPN[2](9bit) / VPN[1](9bit) / VPN[0](9bit) / offset
- * ルートから段を下りながら、無い中間テーブルを作り、最下段にリーフを書く。
+ * 仮想アドレスは VPN[2](9bit) / VPN[1](9bit) / VPN[0](9bit) / offset(12bit)
+ * に分割される。ルートから段を下りながら、無い中間テーブルを作り、
+ * 最下段にリーフを書く。
  */
 void map_page(pte_t *root, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
     if (!is_aligned(vaddr, PAGE_SIZE))
@@ -45,13 +44,11 @@ void map_page(pte_t *root, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
     if (!is_aligned(paddr, PAGE_SIZE))
         PANIC("unaligned paddr %lx", paddr);
 
-#if __riscv_xlen == 64
     // Sv39 で表せるのは39ビットの仮想アドレスだけ（上位ビットはビット38の
     // 符号拡張でなければならない）。このOSは下半分しか使わないので、
     // それを超えるアドレスは添字の計算で黙って切り捨てられる前に止める
     if (vaddr >> (12 + PT_LEVELS * PT_INDEX_BITS - 1))
         PANIC("vaddr %lx is out of the Sv39 lower half", vaddr);
-#endif
 
     pte_t *table = root;
     for (int level = PT_LEVELS - 1; level > 0; level--) {

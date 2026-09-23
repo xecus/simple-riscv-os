@@ -345,14 +345,8 @@ static void handle_interrupt(reg_t code) {
 static void schedule_next_tick(void) {
     uint64_t next = read_time() + TICK_INTERVAL_MS * TICKS_PER_MS;
 
-#if __riscv_xlen == 64
     struct sbiret ret = sbi_call((long) next, 0, 0, 0, 0, 0,
                                  SBI_FID_SET_TIMER, SBI_EID_TIME);
-#else
-    struct sbiret ret = sbi_call((long) (uint32_t) next,
-                                 (long) (uint32_t) (next >> 32),
-                                 0, 0, 0, 0, SBI_FID_SET_TIMER, SBI_EID_TIME);
-#endif
 
     // 予約に失敗するとタイマ割り込みが二度と発生しない。sleep は
     // ポーリングを廃止しているため、誰もプロセスを起こせないまま

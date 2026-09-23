@@ -35,8 +35,8 @@ static void print_hex(unsigned long value, int digits) {
  *
  * 対応する変換指定子:
  * - %d / %x   : int / unsigned（%x は8桁固定）
- * - %ld / %lx : long / unsigned long（%lx は long の幅に合わせて
- *               RV32 で8桁、RV64 で16桁固定）。アドレスや CSR の値に使う
+ * - %ld / %lx : long / unsigned long（%lx は16桁固定）。
+ *               アドレスや CSR の値に使う
  * - %s / %%
  * 未対応の指定子は何も出力せずに読み飛ばす。
  */
@@ -74,8 +74,7 @@ void printf(const char *fmt, ...) {
                     if (*fmt == 'd') {
                         print_signed(__builtin_va_arg(vargs, long));
                     } else if (*fmt == 'x') {
-                        print_hex(__builtin_va_arg(vargs, unsigned long),
-                                  (int) sizeof(unsigned long) * 2);
+                        print_hex(__builtin_va_arg(vargs, unsigned long), 16);
                     } else if (*fmt == '\0') {
                         putchar('%');
                         putchar('l');
