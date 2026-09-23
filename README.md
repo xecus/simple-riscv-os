@@ -1,18 +1,17 @@
 # RISC-V OS Implementation
 
-RISC-V 32ビットアーキテクチャ向けのシンプルなオペレーティングシステムの実装です。
+RISC-V 64ビットアーキテクチャ（RV64）向けのシンプルなオペレーティングシステムの実装です。
+当初は RV32 向けに書かれており、将来の実機（Milk-V など）への移植を見据えて RV64 へ移行しました。
 
 参考：https://operating-system-in-1000-lines.vercel.app/ja/
 
 ## 開発環境の設定
 
 ```bash
-sudo apt update && sudo apt install -y clang llvm lld qemu-system-riscv32 curl
+sudo apt update && sudo apt install -y clang llvm lld qemu-system-riscv64 python3
 ```
 
-```bash
-curl -LO https://github.com/qemu/qemu/raw/v8.0.4/pc-bios/opensbi-riscv32-generic-fw_dynamic.bin
-```
+riscv64 用の OpenSBI（ファームウェア）は QEMU に同梱されているため、別途の取得は不要です。
 
 ## ビルドと実行
 
@@ -33,6 +32,22 @@ Windows（PowerShell または cmd から実行すること）:
 - QEMUでRISC-V仮想マシンを起動
 - カーネルとユーザープログラムを実行
 
+## テスト
+
+Linux / WSL（python3 が必要）:
+
+```bash
+tests/run_tests.sh
+```
+
+- **ユニットテスト**（`tests/unit/`）: テスト用の小さなカーネルとしてビルドし、
+  QEMU 上で実機と同じレジスタ幅・特権モードのまま実行する。
+  printf、メモリ操作、ページテーブル（仕様どおりに辿る検証と、satp を
+  有効にした実機変換の両方）、プロセス生成、スケジューラ、トラップ入口の
+  レジスタ退避、readline、疑似コンソールを対象とする
+- **E2E テスト**（`tests/e2e/`）: 実際の OS を起動してシリアル経由で操作し、
+  コンソールの応答、printer の周期、プロセス終了と自動シャットダウンを確かめる
+
 ## ファイル構成と役割
 
 ### カーネル関連ファイル
@@ -40,7 +55,7 @@ Windows（PowerShell または cmd から実行すること）:
 #### `kernel.h`
 - **役割**: カーネルの中核定数・構造体・関数宣言を定義
 - **内容**: 
-  - 基本型定義（uint32_t、size_t等）
+  - 基本型定義（uint32_t、size_t、アドレス用の uintptr_t、レジスタ幅の reg_t 等）
   - メモリレイアウト定数（PAGE_SIZE、USER_BASE）
   - RISC-V CSR操作マクロ
   - 例外・システムコール番号定義
@@ -80,7 +95,7 @@ Windows（PowerShell または cmd から実行すること）:
 - **役割**: メモリ管理機能の実装
 - **機能**:
   - 物理メモリページ割り当て（バンプアロケータ方式。解放は未実装）
-  - Sv32 2段ページテーブルの操作
+  - Sv39 3段ページテーブルの操作
 
 ### ユーザー空間ファイル
 
@@ -90,13 +105,24 @@ Windows（PowerShell または cmd から実行すること）:
   - システムコール関数宣言
   - ユーザープログラム用ユーティリティ関数
 
-#### `user.c`
-- **役割**: ユーザープログラムとシステムコール実装
+#### `usys.c`
+- **役割**: ユーザー空間のうち命令列を直接書く部分
 - **機能**:
+  - プログラムの入口（start）
   - システムコールインターフェース（syscall）
+
+#### `ulib.c`
+- **役割**: ユーザープログラム向けライブラリ
+- **機能**:
+  - システムコールのラッパー（getchar、putchar、sleep、getpid、exit）
   - 簡易printf実装（フォーマット処理）
-  - 入出力関数（getchar、putchar）
-  - メインプログラム
+  - 行入力（readline）
+
+#### `user.c`
+- **役割**: ユーザープログラム本体
+- **機能**:
+  - 疑似コンソール（run_console）と printer（run_printer）
+  - 起動引数で役割を分ける main
 
 ### 低レベル実装ファイル
 
@@ -125,24 +151,35 @@ Windows（PowerShell または cmd から実行すること）:
 #### `common.c`
 - **役割**: 共通ユーティリティ関数の実装
 - **機能**:
+  - カーネル用printf（%d %x %s %% に加え、64ビット値用の %ld %lx）
   - メモリ操作（memset、memcpy）
   - 文字列操作
-  - OpenSBI呼び出し
+
+#### `sbi.c`
+- **役割**: OpenSBI呼び出し（sbi_call）
+- **機能**:
+  - ecall でファームウェアにコンソール入出力やタイマ設定を依頼する
+  - 命令列を直接書く部分をここに閉じ込め、common.c を純粋な C に保つ
 
 ### ビルド関連ファイル
+
+#### `build.sh`
+- **役割**: ビルドのみを行うスクリプト（run.sh とテストから使う）
+- **機能**:
+  - Clangでのクロスコンパイル
+  - リンカスクリプトを使用したメモリレイアウト制御
+  - 環境変数 OUT で出力先、USER_MAIN でユーザープログラムを切り替えられる
 
 #### `run.sh`
 - **役割**: ビルド・実行スクリプト
 - **機能**:
-  - Clangでのクロスコンパイル
-  - リンカスクリプトを使用したメモリレイアウト制御
-  - QEMUでの実行
+  - build.sh でビルドし、QEMUで実行する
 
 #### `run.ps1`
 - **役割**: Windowsネイティブ用のビルド・実行スクリプト（run.shのPowerShell版）
 - **機能**:
   - PATH上のLLVM/QEMUを自動検出
-  - `-fuse-ld=lld` でLLDを明示指定（Windowsにriscv32向けGNU ldが無いため）
+  - `-fuse-ld=lld` でLLDを明示指定（Windowsにriscv64向けGNU ldが無いため）
 
 #### `kernel.ld`
 - **役割**: カーネル用リンカスクリプト
@@ -224,12 +261,13 @@ Windows（PowerShell または cmd から実行すること）:
 
 ## 技術仕様
 
-- **アーキテクチャ**: RISC-V 32ビット
-- **仮想メモリ**: Sv32（4KB ページング）
+- **アーキテクチャ**: RISC-V 64ビット（RV64IMAC、LP64）
+- **仮想メモリ**: Sv39（3段、4KB ページング）
+- **コードモデル**: medany（カーネルを 0x80200000 に置くため。medlow では符号拡張で壊れる）
 - **特権レベル**: User mode (U) + Supervisor mode (S)  
 - **ページサイズ**: 4KB
 - **ユーザー空間**: 0x1000000 (16MB) 〜 0x1800000 (24MB)
 - **最大メモリ**: 64MB
 - **タイムスライス**: 10ms（タイマ割り込みの間隔）
 - **最大プロセス数**: 8（アイドルプロセスを含む）
-- **ページテーブル**: カーネル領域のマッピングは全プロセスで共有（1プロセスあたり1ページ）
+- **ページテーブル**: カーネル領域のマッピングは全プロセスで共有（プロセスごとに複製するのはルートテーブルの1ページだけで、下位の段は共有する）

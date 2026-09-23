@@ -2,7 +2,7 @@
 #
 # 必要なツール:
 #   LLVM (clang / llvm-objcopy / lld)  winget install LLVM.LLVM
-#   QEMU (qemu-system-riscv32)         winget install SoftwareFreedomConservancy.QEMU
+#   QEMU (qemu-system-riscv64)         winget install SoftwareFreedomConservancy.QEMU
 #
 # 注意: シリアルコンソール(-serial mon:stdio)を使うため、
 #       Git BashやMinTTYではなくPowerShellまたはcmdから実行すること。
@@ -24,12 +24,13 @@ function Find-Tool {
 
 $CC      = Find-Tool 'clang'               @('C:\Program Files\LLVM\bin\clang.exe')
 $OBJCOPY = Find-Tool 'llvm-objcopy'        @('C:\Program Files\LLVM\bin\llvm-objcopy.exe')
-$QEMU    = Find-Tool 'qemu-system-riscv32' @('C:\Program Files\qemu\qemu-system-riscv32.exe')
+$QEMU    = Find-Tool 'qemu-system-riscv64' @('C:\Program Files\qemu\qemu-system-riscv64.exe')
 
-# -fuse-ld=lld: Windowsにはriscv32向けのGNU ldが無いためLLDを明示的に指定する
+# -fuse-ld=lld: Windowsにはriscv64向けのGNU ldが無いためLLDを明示的に指定する
+# それ以外のフラグは build.sh と揃えること（-mcmodel=medany の理由も build.sh を参照）
 $CFLAGS = @(
     '-std=c11', '-O2', '-g3', '-Wall', '-Wextra',
-    '--target=riscv32-unknown-elf',
+    '--target=riscv64-unknown-elf', '-mcmodel=medany',
     '-fno-stack-protector', '-ffreestanding', '-nostdlib',
     '-fuse-ld=lld'
 )
@@ -41,24 +42,20 @@ function Assert-Success {
 }
 
 # ユーザープログラムをビルドし、カーネルに埋め込めるオブジェクトへ変換
-& $CC @CFLAGS '-Wl,-Tuser.ld' '-Wl,-Map=shell.map' -o shell.elf user.c
+& $CC @CFLAGS '-Wl,-Tuser.ld' '-Wl,-Map=shell.map' -o shell.elf usys.c ulib.c user.c
 Assert-Success 'shell.elf のビルド'
 
 & $OBJCOPY '--set-section-flags' '.bss=alloc,contents' -O binary shell.elf shell.bin
 Assert-Success 'shell.bin の生成'
 
-& $OBJCOPY -Ibinary -Oelf32-littleriscv shell.bin shell.bin.o
+& $OBJCOPY -Ibinary -Oelf64-littleriscv shell.bin shell.bin.o
 Assert-Success 'shell.bin.o の生成'
 
 # カーネルをビルド
 & $CC @CFLAGS '-Wl,-Tkernel.ld' '-Wl,-Map=kernel.map' -o kernel.elf `
-    kernel.c common.c exception.c memory.c process.c shell.bin.o
+    kernel.c common.c sbi.c exception.c memory.c process.c shell.bin.o
 Assert-Success 'kernel.elf のビルド'
 
-# QEMUを起動
-# 配布物にriscv32用OpenSBIが含まれない場合に備え、ローカルにあればそれを使う
-$OPENSBI = 'opensbi-riscv32-generic-fw_dynamic.bin'
-if (Test-Path $OPENSBI) { $bios = $OPENSBI } else { $bios = 'default' }
-
-& $QEMU -machine virt -bios $bios -nographic -serial mon:stdio --no-reboot `
+# QEMUを起動。riscv64 用の OpenSBI は QEMU に同梱されているので -bios default で使う
+& $QEMU -machine virt -bios default -nographic -serial mon:stdio --no-reboot `
     -kernel kernel.elf

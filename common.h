@@ -6,8 +6,9 @@ typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
 typedef unsigned long size_t;
-typedef uint32_t paddr_t;
-typedef uint32_t vaddr_t;
+typedef unsigned long uintptr_t;   // kernel.h と同じ定義にすること
+typedef uintptr_t paddr_t;
+typedef uintptr_t vaddr_t;
 
 #define PAGE_SIZE 4096
 
@@ -29,4 +30,8 @@ void *memcpy(void *dst, const void *src, size_t n);
 char *strcpy(char *dst, const char *src);
 int strcmp(const char *s1, const char *s2);
 void printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+// printf の出力先。カーネルでは kernel.c が SBI 経由で実装し、
+// ユニットテストでは出力を捕捉するモックに差し替える
+void putchar(char ch);
 void delay(void);

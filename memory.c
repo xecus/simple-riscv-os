@@ -22,30 +22,48 @@ paddr_t alloc_pages(uint32_t n) {
 }
 
 /**
- * @brief Sv32 の2段ページテーブルに vaddr -> paddr のマッピングを作る
- * @param table1 1段目（ルート）ページテーブルの先頭アドレス
- *
- * 仮想アドレスは VPN[1](10bit) / VPN[0](10bit) / offset(12bit) に分割される。
- * 各テーブルは 1024エントリ x 4バイト = ちょうど1ページに収まる。
+ * @brief 仮想アドレスから、指定した段のテーブルの添字を取り出す
+ * @param level 段の番号（0 が最下段、PT_LEVELS - 1 がルート）
  */
-void map_page(uint32_t *table1, uint32_t vaddr, paddr_t paddr, uint32_t flags) {
+static uintptr_t pt_index(vaddr_t vaddr, int level) {
+    return (vaddr >> (12 + level * PT_INDEX_BITS)) & ((1UL << PT_INDEX_BITS) - 1);
+}
+
+/**
+ * @brief ページテーブルに vaddr -> paddr のマッピングを作る
+ * @param root ルート（最上段）ページテーブルの先頭アドレス
+ *
+ * 仮想アドレスは VPN[2](9bit) / VPN[1](9bit) / VPN[0](9bit) / offset(12bit)
+ * に分割される。ルートから段を下りながら、無い中間テーブルを作り、
+ * 最下段にリーフを書く。
+ */
+void map_page(pte_t *root, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
     if (!is_aligned(vaddr, PAGE_SIZE))
-        PANIC("unaligned vaddr %x", vaddr);
+        PANIC("unaligned vaddr %lx", vaddr);
 
     if (!is_aligned(paddr, PAGE_SIZE))
-        PANIC("unaligned paddr %x", paddr);
+        PANIC("unaligned paddr %lx", paddr);
 
-    uint32_t vpn1 = (vaddr >> 22) & 0x3ff;
-    if ((table1[vpn1] & PAGE_V) == 0) {
-        // 2段目のページテーブルが存在しないので作成する。
-        // 中間エントリは R/W/X も A/D も立てない（立てるとリーフ扱いになる）
-        uint32_t pt_paddr = alloc_pages(1);
-        table1[vpn1] = ((pt_paddr / PAGE_SIZE) << 10) | PAGE_V;
+    // Sv39 で表せるのは39ビットの仮想アドレスだけ（上位ビットはビット38の
+    // 符号拡張でなければならない）。このOSは下半分しか使わないので、
+    // それを超えるアドレスは添字の計算で黙って切り捨てられる前に止める
+    if (vaddr >> (12 + PT_LEVELS * PT_INDEX_BITS - 1))
+        PANIC("vaddr %lx is out of the Sv39 lower half", vaddr);
+
+    pte_t *table = root;
+    for (int level = PT_LEVELS - 1; level > 0; level--) {
+        pte_t *entry = &table[pt_index(vaddr, level)];
+        if ((*entry & PAGE_V) == 0) {
+            // 次の段のページテーブルが存在しないので作成する。
+            // 中間エントリは R/W/X も A/D も立てない（立てるとリーフ扱いになる）
+            paddr_t pt_paddr = alloc_pages(1);
+            *entry = ((pt_paddr / PAGE_SIZE) << PTE_PPN_SHIFT) | PAGE_V;
+        }
+        table = (pte_t *) ((*entry >> PTE_PPN_SHIFT) * PAGE_SIZE);
     }
 
-    // 2段目のページテーブルにエントリを追加する。
+    // 最下段のテーブルにリーフエントリを書く。
     // A/D ビットはハードウェアが自動更新しない実装もあるため、あらかじめ立てておく
-    uint32_t vpn0 = (vaddr >> 12) & 0x3ff;
-    uint32_t *table0 = (uint32_t *) ((table1[vpn1] >> 10) * PAGE_SIZE);
-    table0[vpn0] = ((paddr / PAGE_SIZE) << 10) | flags | PAGE_A | PAGE_D | PAGE_V;
+    table[pt_index(vaddr, 0)] =
+        ((paddr / PAGE_SIZE) << PTE_PPN_SHIFT) | flags | PAGE_A | PAGE_D | PAGE_V;
 }

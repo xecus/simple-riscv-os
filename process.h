@@ -1,5 +1,6 @@
 #pragma once
 #include "kernel.h"
+#include "memory.h"
 
 #define PROCS_MAX 8       // 最大プロセス数
 
@@ -12,15 +13,15 @@ struct process {
     int pid;             // プロセスID
     int state;           // プロセスの状態: PROC_UNUSED / RUNNABLE / SLEEPING / EXITED
     vaddr_t sp;          // コンテキストスイッチ時のスタックポインタ
-    uint32_t *page_table;
+    pte_t *page_table;   // ルートページテーブル
     uint64_t wake_time;  // PROC_SLEEPING のときの起床時刻（time CSR の値）
     uint32_t arg;        // ユーザープロセスへ渡す起動引数（a0 に載せる）
 
     // カーネルスタック。RISC-V の呼び出し規約はスタックポインタが16バイト
     // 境界にあることを要求する。スタック末尾をそのまま sp / sscratch に
     // 使うため、ここを16バイト境界に揃えて構造体サイズも16の倍数にする
-    // （揃えないと wake_time の分だけサイズが 8216 になり、配列の
-    //   奇数番目の要素で末尾が8バイト境界にずれる）
+    // （揃えないと構造体サイズが16の倍数にならず、配列の要素によっては
+    //   末尾が8バイト境界にずれる）
     uint8_t stack[PROCESS_STACK_SIZE] __attribute__((aligned(16)));
 };
 
@@ -32,7 +33,7 @@ struct process *create_idle_process(void);
 struct process *create_process2(const void *image, size_t image_size,
                                 uint32_t arg);
 
-void switch_context(uint32_t *prev_sp, uint32_t *next_sp);
+void switch_context(vaddr_t *prev_sp, vaddr_t *next_sp);
 void yield(void);
 void wake_expired_processes(uint64_t now);
 int has_live_process(void);
