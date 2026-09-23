@@ -35,6 +35,7 @@ extern struct process procs[PROCS_MAX];
 #define SPEC_U 0x10
 #define SPEC_A 0x40
 #define SPEC_D 0x80
+#define SPEC_PPN_BITS 44             // PPN はビット10から44ビット。その上は属性
 
 // ユーザーページとカーネルページに期待するフラグ（A/D は実装が事前に立てる）
 #define FLAGS_USER   (SPEC_U | SPEC_R | SPEC_W | SPEC_X | SPEC_A | SPEC_D | SPEC_V)
@@ -102,6 +103,9 @@ void handle_trap(struct trap_frame *f) {
  * @brief 仕様どおりにページテーブルを辿る
  * @return 1: 4KB のリーフが見つかった / 0: 未マップ / -1: 形式が不正
  */
+// 直前の spec_walk が見つけたリーフ PTE の値（上位の属性ビットの検査用）
+static unsigned long spec_last_leaf;
+
 static int spec_walk(unsigned long root, unsigned long va,
                      unsigned long *pa, unsigned long *flags) {
     unsigned long table = root;
@@ -115,7 +119,8 @@ static int spec_walk(unsigned long root, unsigned long va,
             return 0;
         }
 
-        unsigned long next = (pte >> 10) << 12;
+        unsigned long ppn = (pte >> 10) & ((1UL << SPEC_PPN_BITS) - 1);
+        unsigned long next = ppn << 12;
         if (pte & (SPEC_R | SPEC_W | SPEC_X)) {
             // このOSはスーパーページを使わないので、リーフは最下段にしか無いはず
             if (level != 0) {
@@ -123,11 +128,12 @@ static int spec_walk(unsigned long root, unsigned long va,
             }
             *pa = next | (va & 0xfff);
             *flags = pte & 0x3ff;
+            spec_last_leaf = pte;
             return 1;
         }
 
-        // 中間エントリは V 以外のフラグを持たない（A/D/U も立てない）
-        if ((pte & 0x3ff) != SPEC_V) {
+        // 中間エントリは V 以外のフラグを持たない（A/D/U も、上位の属性も立てない）
+        if ((pte & ~(((1UL << SPEC_PPN_BITS) - 1) << 10)) != SPEC_V) {
             return -1;
         }
         table = next;
@@ -286,6 +292,21 @@ static void test_map_page_follows_spec(void) {
     // マップしていないアドレスは見つからない
     CHECK_EQ(spec_walk(root, USER_BASE + 0x2000, &pa, &flags), 0);
     CHECK_EQ(spec_walk(root, 0x40000000, &pa, &flags), 0);
+}
+
+// リーフにはプラットフォームのメモリ属性（qemu-virt では 0）が付き、
+// それ以外の上位ビットは立たない。中間エントリに付かないことは spec_walk が確かめる
+static void test_map_page_sets_platform_attributes(void) {
+    unsigned long root = (unsigned long) alloc_pages(1);
+    unsigned long page = (unsigned long) alloc_pages(1);
+    unsigned long pa, flags;
+
+    map_page((void *) root, USER_BASE, page, PAGE_R);
+
+    CHECK_EQ(spec_walk(root, USER_BASE, &pa, &flags), 1);
+    CHECK_EQ(pa, page);
+    CHECK_EQ(spec_last_leaf >> (10 + SPEC_PPN_BITS),
+             (unsigned long) PTE_ATTR_NORMAL_MEM >> (10 + SPEC_PPN_BITS));
 }
 
 static void test_map_page_allocates_intermediate_tables_once(void) {
@@ -661,6 +682,7 @@ void run_all_tests(void) {
     RUN(test_memory_and_string_functions);
     RUN(test_alloc_pages);
     RUN(test_map_page_follows_spec);
+    RUN(test_map_page_sets_platform_attributes);
     RUN(test_map_page_allocates_intermediate_tables_once);
     RUN(test_map_page_translates_on_hardware);
     RUN(test_create_process2);
