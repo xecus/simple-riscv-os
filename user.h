@@ -15,6 +15,9 @@
 #define PROC_ARG_PRINTER 0
 #define PROC_ARG_CONSOLE 1
 
+// システムコールを発行する（usys.c）。a0-a2 に引数、a3 に番号を載せて ecall する
+int syscall(int sysno, int arg0, int arg1, int arg2);
+
 // Core system functions
 __attribute__((noreturn)) void exit(void);
 int getchar(void);

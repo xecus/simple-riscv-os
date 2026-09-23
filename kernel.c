@@ -21,6 +21,22 @@ static void init_process_management(void);
 static void create_user_processes(void);
 
 /**
+ * @brief コンソールから1文字読む（SBI Console Getchar、legacy 拡張）
+ * @return 文字コード。入力が無ければ負の値
+ */
+long getchar(void) {
+    struct sbiret ret = sbi_call(0, 0, 0, 0, 0, 0, 0, 2);
+    return ret.error;
+}
+
+/**
+ * @brief コンソールへ1文字書く（SBI Console Putchar、legacy 拡張）
+ */
+void putchar(char ch) {
+    sbi_call(ch, 0, 0, 0, 0, 0, 0, 1 /* Console Putchar */);
+}
+
+/**
  * @brief ユーザーモードへ落ちる入口
  *
  * プロセスが初めてスケジュールされたとき、switch_context() の ret から

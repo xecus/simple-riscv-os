@@ -41,7 +41,7 @@ function Assert-Success {
 }
 
 # ユーザープログラムをビルドし、カーネルに埋め込めるオブジェクトへ変換
-& $CC @CFLAGS '-Wl,-Tuser.ld' '-Wl,-Map=shell.map' -o shell.elf user.c
+& $CC @CFLAGS '-Wl,-Tuser.ld' '-Wl,-Map=shell.map' -o shell.elf usys.c ulib.c user.c
 Assert-Success 'shell.elf のビルド'
 
 & $OBJCOPY '--set-section-flags' '.bss=alloc,contents' -O binary shell.elf shell.bin
@@ -52,7 +52,7 @@ Assert-Success 'shell.bin.o の生成'
 
 # カーネルをビルド
 & $CC @CFLAGS '-Wl,-Tkernel.ld' '-Wl,-Map=kernel.map' -o kernel.elf `
-    kernel.c common.c exception.c memory.c process.c shell.bin.o
+    kernel.c common.c sbi.c exception.c memory.c process.c shell.bin.o
 Assert-Success 'kernel.elf のビルド'
 
 # QEMUを起動
