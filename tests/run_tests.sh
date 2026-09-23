@@ -74,7 +74,11 @@ check_platform_build() {
 
 check_platform_build milkv-duo 0000000083f00000 || FAILED=1
 
-python3 "$ROOT/tests/e2e/e2e.py" || FAILED=1
+# E2E テストは QEMU で動かせるプラットフォームごとに回す。
+# qemu-c906 は Milk-V Duo の CPU（T-Head C906）と DRAM 容量（64MB）に寄せた構成
+for platform in qemu-virt qemu-c906; do
+    python3 "$ROOT/tests/e2e/e2e.py" --platform "$platform" || FAILED=1
+done
 
 if [ $FAILED -ne 0 ]; then
     echo "SOME TESTS FAILED"

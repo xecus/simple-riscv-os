@@ -39,13 +39,25 @@ QEMU virt と実機で異なる値（タイマ周波数、物理メモリの範�
 既定は `qemu-virt` です。
 
 ```bash
+PLATFORM=qemu-c906 ./run.sh       # Duo の CPU とメモリ容量に寄せた QEMU で実行する
 PLATFORM=milkv-duo ./build.sh     # Milk-V Duo 向けにビルドだけ行う
 ```
 
 | PLATFORM | 対象 | 状態 |
 |---|---|---|
-| `qemu-virt` | QEMU の virt マシン | 動作確認済み。`run.sh` / `run.ps1` はこれ専用 |
+| `qemu-virt` | QEMU の virt マシン | 動作確認済み |
+| `qemu-c906` | QEMU の virt マシン + T-Head C906 の CPU モデル + 64MB | 動作確認済み |
 | `milkv-duo` | Milk-V Duo（CV1800B、64MB） | ビルドのみ確認。値は公開資料に基づき、実機では未確認 |
+
+`run.sh` と `run.ps1` で実行できるのは、`platform/<名前>/qemu.args` がある
+プラットフォームだけです。このファイルに QEMU の追加オプションを書きます。
+
+`qemu-c906` は Milk-V Duo そのものではなく、Duo の CPU と DRAM 容量に寄せた
+QEMU です。C906 の CPU モデルと 64MB の構成で動くことを確かめられますが、
+次の2点は `milkv-duo` と異なり、実機でしか確かめられません。
+
+- タイマ周波数は QEMU の 10MHz を使う（Duo は 25MHz）
+- PTE のメモリ属性ビットを立てない（理由は次の段落）
 
 `milkv-duo` 向けのカーネルは QEMU の `-cpu thead-c906` でも動きません。
 T-Head C906 独自のメモリ属性ビット（MAEE）を PTE に立てているためで、
@@ -67,7 +79,8 @@ tests/run_tests.sh
   有効にした実機変換の両方）、プロセス生成、スケジューラ、トラップ入口の
   レジスタ退避、readline、疑似コンソールを対象とする
 - **E2E テスト**（`tests/e2e/`）: 実際の OS を起動してシリアル経由で操作し、
-  コンソールの応答、printer の周期、プロセス終了と自動シャットダウンを確かめる
+  コンソールの応答、printer の周期、プロセス終了と自動シャットダウンを確かめる。
+  `qemu-virt` と `qemu-c906` の両方で回す
 - **プラットフォームのビルド確認**: QEMU で動かせない `milkv-duo` 向けに、
   リンクが通ることと空き RAM の終端が期待どおりであることを確かめる
 
@@ -204,6 +217,8 @@ tests/run_tests.sh
 - **機能**:
   - PATH上のLLVM/QEMUを自動検出
   - `-fuse-ld=lld` でLLDを明示指定（Windowsにriscv64向けGNU ldが無いため）
+  - 環境変数 PLATFORM で QEMU 向けのプラットフォームを選べる
+  - BOM 付き UTF-8 で保存する（Windows PowerShell 5.1 が日本語を正しく読むため）
 
 #### `kernel.ld`
 - **役割**: カーネル用リンカスクリプト
@@ -218,6 +233,7 @@ tests/run_tests.sh
 - **内容**:
   - `platform.h`: PLATFORM_NAME、TIMER_FREQ_HZ、PTE_ATTR_NORMAL_MEM
   - `platform.ld`: RAM_END、FREE_RAM_END
+  - `qemu.args`: QEMU の追加オプション。QEMU で実行できるプラットフォームにだけ置く
   - 共通コードは #ifdef で分岐せず、build.sh が検索パス（-I と -L）で読み分ける
 
 #### `.gitignore`

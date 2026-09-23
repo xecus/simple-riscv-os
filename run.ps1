@@ -1,21 +1,36 @@
-# Windowsネイティブ用のビルド・実行スクリプト（run.shのPowerShell版）
+﻿# Windowsネイティブ用のビルド・実行スクリプト（run.shのPowerShell版）
 #
 # 必要なツール:
 #   LLVM (clang / llvm-objcopy / lld)  winget install LLVM.LLVM
 #   QEMU (qemu-system-riscv64)         winget install SoftwareFreedomConservancy.QEMU
 #
+# 注意: このファイルは BOM 付き UTF-8 で保存すること。BOM が無いと
+#       Windows PowerShell 5.1 が日本語を Shift_JIS として読み、構文エラーになる。
 # 注意: シリアルコンソール(-serial mon:stdio)を使うため、
 #       Git BashやMinTTYではなくPowerShellまたはcmdから実行すること。
 
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
-# QEMU で実行するので、QEMU 以外向けのビルドは受け付けない
-# （build.sh の PLATFORM に相当。実機向けは WSL で build.sh を使うこと）
-if ($env:PLATFORM -and $env:PLATFORM -ne 'qemu-virt') {
-    throw "PLATFORM=$($env:PLATFORM) は QEMU で実行できません。build.sh でビルドしてください。"
+# 対象のプラットフォーム（build.sh の PLATFORM に相当。既定: qemu-virt）。
+# QEMU で実行できるのは platform/<名前>/qemu.args があるものだけ。
+# 実機向け（milkv-duo など）は WSL で build.sh を使ってビルドすること
+$Platform = if ($env:PLATFORM) { $env:PLATFORM } else { 'qemu-virt' }
+$PlatformDir = "platform/$Platform"
+if (-not (Test-Path "$PlatformDir/platform.h")) {
+    throw "PLATFORM=$Platform は存在しません。platform/ を確認してください。"
 }
-$PlatformDir = 'platform/qemu-virt'
+if (-not (Test-Path "$PlatformDir/qemu.args")) {
+    throw "PLATFORM=$Platform は QEMU で実行できません。build.sh でビルドしてください。"
+}
+
+# qemu.args から追加オプションを読む（# で始まる行は無視し、空白で分割する）。
+# Windows PowerShell 5.1 は BOM の無いファイルを ANSI（日本語環境では
+# Shift_JIS）として読み、日本語のコメント行が崩れるので UTF-8 を指定する
+$QemuArgs = @(Get-Content -Encoding UTF8 "$PlatformDir/qemu.args" |
+    Where-Object { $_ -notmatch '^\s*#' } |
+    ForEach-Object { $_ -split '\s+' } |
+    Where-Object { $_ })
 
 # PATH上のツールを探し、見つからなければ既定のインストール先を確認する
 function Find-Tool {
@@ -65,5 +80,5 @@ Assert-Success 'shell.bin.o の生成'
 Assert-Success 'kernel.elf のビルド'
 
 # QEMUを起動。riscv64 用の OpenSBI は QEMU に同梱されているので -bios default で使う
-& $QEMU -machine virt -bios default -nographic -serial mon:stdio --no-reboot `
+& $QEMU -machine virt @QemuArgs -bios default -nographic -serial mon:stdio --no-reboot `
     -kernel kernel.elf

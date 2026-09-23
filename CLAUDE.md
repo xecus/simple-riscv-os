@@ -60,6 +60,10 @@ E2E テスト（tests/e2e/、実際の OS をシリアル経由で操作）を�
 - QEMU virt と実機で異なる値は platform/<名前>/ に置き、共通コードで #ifdef しない
 - 新しい値を足すときは、全プラットフォームの platform.h / platform.ld に揃えて定義する
 - milkv-duo の値は実機で未確認（各ファイルの【要確認】を参照）
+- qemu-c906 は Duo の CPU（-cpu thead-c906）と 64MB に寄せた QEMU 構成。
+  platform.ld は milkv-duo と揃える。タイマ周波数と PTE 属性は QEMU に合わせる
+- QEMU で実行できるのは platform/<名前>/qemu.args があるプラットフォームだけ
+- run.ps1 は BOM 付き UTF-8 で保存する（無いと PowerShell 5.1 で構文エラーになる）
 - コンパイルフラグは build.sh、run.ps1、tests/run_tests.sh の3か所で揃える
 
 ### RISC-V固有の実装

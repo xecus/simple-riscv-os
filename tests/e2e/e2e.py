@@ -6,8 +6,11 @@ E2E テスト: 実際にビルドした OS を QEMU で起動し、シリアル�
 システムコール、タイマ割り込み、プロセス切り替えがつながった状態で、
 利用者から見える振る舞いが変わっていないことを確かめる。
 
-使い方: python3 tests/e2e/e2e.py
+使い方: python3 tests/e2e/e2e.py [--platform 名前]
+        --platform を省略すると qemu-virt。platform/<名前>/qemu.args が
+        あるプラットフォームだけを指定できる
 """
+import argparse
 import os
 import re
 import subprocess
@@ -18,20 +21,34 @@ import time
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 BUILD = os.path.join(ROOT, "build", "e2e")
 
+# テスト対象のプラットフォーム。main() がコマンドライン引数から決める
+PLATFORM = "qemu-virt"
+
 PRINTER_INTERVAL = 3.0   # user.c の PRINTER_INTERVAL_SEC
 
 
+def qemu_args_path(platform):
+    return os.path.join(ROOT, "platform", platform, "qemu.args")
+
+
+def platform_qemu_args(platform):
+    """platform/<名前>/qemu.args の追加オプション（run.sh と同じ書式）"""
+    with open(qemu_args_path(platform), encoding="utf-8") as f:
+        return [arg for line in f if not line.lstrip().startswith("#")
+                for arg in line.split()]
+
+
 def qemu_command(kernel):
-    # tests/run_tests.sh の QEMU 設定と揃えること
-    return ["qemu-system-riscv64", "-machine", "virt", "-bios", "default",
-            "-nographic", "-serial", "stdio", "-monitor", "none", "--no-reboot",
-            "-kernel", kernel]
+    # run.sh の QEMU 設定と揃えること（シリアルとモニタの扱いだけテスト用に変えている）
+    return (["qemu-system-riscv64", "-machine", "virt"] + platform_qemu_args(PLATFORM)
+            + ["-bios", "default", "-nographic", "-serial", "stdio", "-monitor", "none",
+               "--no-reboot", "-kernel", kernel])
 
 
 def build(name, user_main):
-    out = os.path.join(BUILD, name)
-    # QEMU で動かすので、呼び出し元の環境変数に関わらず qemu-virt 向けにビルドする
-    env = dict(os.environ, OUT=out, USER_MAIN=user_main, PLATFORM="qemu-virt")
+    out = os.path.join(BUILD, PLATFORM, name)
+    # 呼び出し元の環境変数 PLATFORM には左右されず、--platform の値でビルドする
+    env = dict(os.environ, OUT=out, USER_MAIN=user_main, PLATFORM=PLATFORM)
     result = subprocess.run(["bash", os.path.join(ROOT, "build.sh")], env=env)
     if result.returncode != 0:
         raise Failure("build failed (USER_MAIN=%s)" % user_main)
@@ -127,7 +144,7 @@ def scenario_console():
     """通常の user.c: 疑似コンソールの操作と、printer の周期・継続"""
     q = Qemu(build("console", "user.c"))
     try:
-        q.expect_text("RISC-V OS Starting...")
+        q.expect_text("RISC-V OS Starting... (platform: %s)\n" % PLATFORM)
         m = q.expect(r"console \(pid (\d+)\) ready\. type 'help' for commands\.\n> ")
         pid = m.group(1)
         if pid != "3":
@@ -195,7 +212,7 @@ def scenario_exit_and_shutdown():
     """tests/e2e/exit_test.c: 全プロセスの終了、デマンドページング、自動シャットダウン"""
     q = Qemu(build("exit", "tests/e2e/exit_test.c"))
     try:
-        q.expect_text("RISC-V OS Starting...")
+        q.expect_text("RISC-V OS Starting... (platform: %s)\n" % PLATFORM)
         # 役割と PID、プロセスごとに独立したメモリ、終了の順序
         q.expect_text("[A] pid 2 arg 0\n")
         q.expect_text("[B] pid 3 arg 1\n")
@@ -220,9 +237,19 @@ SCENARIOS = [scenario_console, scenario_exit_and_shutdown]
 
 
 def main():
+    global PLATFORM
+    parser = argparse.ArgumentParser(description="E2E テスト")
+    parser.add_argument("--platform", default="qemu-virt",
+                        help="テスト対象のプラットフォーム（既定: qemu-virt）")
+    PLATFORM = parser.parse_args().platform
+    if not os.path.isfile(qemu_args_path(PLATFORM)):
+        print("[FAIL] e2e: PLATFORM=%s cannot run on QEMU (no %s)"
+              % (PLATFORM, qemu_args_path(PLATFORM)), flush=True)
+        return 1
+
     failed = 0
     for scenario in SCENARIOS:
-        name = scenario.__name__
+        name = "%s/%s" % (PLATFORM, scenario.__name__)
         print("[RUN ] e2e/%s" % name, flush=True)
         started = time.monotonic()
         try:
@@ -240,9 +267,9 @@ def main():
         print("[ OK ] e2e/%s (%.1fs)" % (name, time.monotonic() - started), flush=True)
 
     if failed:
-        print("E2E TESTS FAILED (%d/%d)" % (failed, len(SCENARIOS)))
+        print("E2E TESTS FAILED on %s (%d/%d)" % (PLATFORM, failed, len(SCENARIOS)))
         return 1
-    print("ALL E2E TESTS PASSED")
+    print("ALL E2E TESTS PASSED on %s" % PLATFORM)
     return 0
 
 
