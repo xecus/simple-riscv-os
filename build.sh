@@ -26,9 +26,13 @@ LLVM_OBJCOPY=${LLVM_OBJCOPY:-llvm-objcopy}
 # -mcmodel=medany: アドレスを PC 相対で作る。既定の medlow は lui で絶対番地を
 # 作るため、0x80000000 以上のアドレス（カーネルの配置先）が符号拡張されて
 # 0xffffffff80000000 のような値になってしまう。
+# -march / -mabi: 使う命令セットを明示する。既定の rv64gc / lp64d のままだと
+# コンパイラが浮動小数点命令やレジスタを使うことがあるが、このカーネルは
+# FPU を有効化していない（sstatus.FS = 0）ので実機では不正命令例外になる。
+# fence.i を使うため Zifencei、CSR 命令のため Zicsr も含める
 # tests/run_tests.sh と run.ps1 のフラグもこれと揃えること
 # -I$PLATFORM_DIR: kernel.h が読む platform.h をプラットフォームごとに切り替える
-CFLAGS="-std=c11 -O2 -g3 -Wall -Wextra --target=riscv64-unknown-elf -mcmodel=medany -fno-stack-protector -ffreestanding -nostdlib -I$ROOT -I$PLATFORM_DIR"
+CFLAGS="-std=c11 -O2 -g3 -Wall -Wextra --target=riscv64-unknown-elf -march=rv64imac_zicsr_zifencei -mabi=lp64 -mcmodel=medany -fno-stack-protector -ffreestanding -nostdlib -I$ROOT -I$PLATFORM_DIR"
 
 mkdir -p "$OUT"
 

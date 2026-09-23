@@ -37,7 +37,8 @@ $QEMU    = Find-Tool 'qemu-system-riscv64' @('C:\Program Files\qemu\qemu-system-
 # それ以外のフラグは build.sh と揃えること（-mcmodel=medany の理由も build.sh を参照）
 $CFLAGS = @(
     '-std=c11', '-O2', '-g3', '-Wall', '-Wextra',
-    '--target=riscv64-unknown-elf', '-mcmodel=medany',
+    '--target=riscv64-unknown-elf', '-march=rv64imac_zicsr_zifencei', '-mabi=lp64',
+    '-mcmodel=medany',
     '-fno-stack-protector', '-ffreestanding', '-nostdlib',
     '-fuse-ld=lld', "-I$PlatformDir"
 )

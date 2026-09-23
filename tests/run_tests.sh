@@ -22,7 +22,7 @@ run_unit_image() {
     mkdir -p "$out"
     echo "[BUILD] unit/$name"
     # コンパイルフラグは build.sh と揃えること
-    if ! $CLANG -std=c11 -O2 -g3 -Wall -Wextra --target=riscv64-unknown-elf -mcmodel=medany -fno-stack-protector \
+    if ! $CLANG -std=c11 -O2 -g3 -Wall -Wextra --target=riscv64-unknown-elf -march=rv64imac_zicsr_zifencei -mabi=lp64 -mcmodel=medany -fno-stack-protector \
             -ffreestanding -nostdlib -I"$ROOT" -I"$ROOT/platform/qemu-virt" -I"$ROOT/tests/unit" \
             -Wl,-T"$ROOT/tests/unit/test.ld" -o "$elf" \
             "$ROOT/tests/unit/harness.c" "$ROOT/sbi.c" "$@"; then
