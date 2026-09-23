@@ -211,6 +211,27 @@ void wake_expired_processes(uint64_t now) {
     }
 }
 
+/**
+ * @brief 生きているユーザープロセスが残っているか調べる
+ * @return 1つでも残っていれば 1、無ければ 0
+ *
+ * アイドルプロセス（pid 0）と未使用スロットは数えない。終了済みの
+ * プロセスは PROC_EXITED のまま残るので、ここでも除外される。
+ */
+int has_live_process(void) {
+    for (int i = 0; i < PROCS_MAX; i++) {
+        if (procs[i].pid <= 0) {
+            continue;
+        }
+
+        if (procs[i].state == PROC_RUNNABLE || procs[i].state == PROC_SLEEPING) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 void yield(void) {
     // 実行可能なプロセスを探す
     struct process *next = idle_proc;

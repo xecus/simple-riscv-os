@@ -2,11 +2,28 @@
 
 extern char __stack_top[];
 
+// コンソールの設定
+#define CONSOLE_BUF_SIZE     64   // 1行あたりの最大文字数（終端文字を含む）
+#define PRINTER_INTERVAL_SEC 3    // printer プロセスの出力間隔
+
+// 起動時に作られる2プロセスのPID。alloc_process() が pid = スロット番号 + 1 を
+// 振り、スロット0はアイドルプロセス（pid 0 に上書き）が使うため、
+// 1つ目のユーザープロセスが 2、2つ目が 3 になる
+#define PRINTER_PID 2
+#define CONSOLE_PID 3
+
+// 端末から送られてくる編集キー
+#define KEY_BACKSPACE 0x08
+#define KEY_DELETE    0x7f
+
 // printf の内部ヘルパー（このファイル内だけで使う static 関数）
 static void process_format_specifier(char spec, __builtin_va_list *args);
 static void print_string(const char *str);
 static void print_decimal(int value);
 static void print_hexadecimal(unsigned value);
+static int str_eq(const char *a, const char *b);
+static void run_console(int pid);
+static void run_printer(void);
 
 /**
  * @brief システムコール呼び出しインターface
@@ -210,23 +227,145 @@ static void print_hexadecimal(unsigned value) {
 }
 
 __attribute__((noreturn)) void exit(void) {
+    syscall(SYS_EXIT, 0, 0, 0);
+
+    // カーネルは戻ってこない。noreturn を満たすために置いておく
     for (;;);
+}
+
+/**
+ * @brief 2つの文字列が一致するか調べる
+ *
+ * user.c には common.c をリンクしないため strcmp が使えない。
+ */
+static int str_eq(const char *a, const char *b) {
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+
+    return *a == *b;
+}
+
+/**
+ * @brief コンソールから1行読み取る
+ * @param buf 読み取った文字列を格納するバッファ（NUL終端する）
+ * @param size buf のサイズ（終端文字を含む）
+ * @return 読み取った文字数
+ *
+ * 改行が来るまで getchar() で1文字ずつ読む。QEMU の -serial mon:stdio は
+ * 端末をローモードにするため端末側のエコーが無く、ここでエコーを返す。
+ */
+int readline(char *buf, int size) {
+    int len = 0;
+
+    if (size <= 0) {
+        return 0;
+    }
+
+    for (;;) {
+        int ch = getchar();
+
+        if (ch < 0) {
+            continue;   // カーネルが待つので通常は起きない
+        }
+
+        // 端末は Enter で CR を送ってくる。LF も念のため受ける
+        if (ch == '\r' || ch == '\n') {
+            putchar('\n');
+            break;
+        }
+
+        if (ch == KEY_BACKSPACE || ch == KEY_DELETE) {
+            if (len > 0) {
+                len--;
+                // カーソルを戻して空白で消し、もう一度戻す
+                putchar('\b');
+                putchar(' ');
+                putchar('\b');
+            }
+            continue;
+        }
+
+        // 印字可能文字だけを受け付ける
+        if (ch < 0x20 || ch > 0x7e) {
+            continue;
+        }
+
+        // 満杯になった後の入力は捨てる（エコーもしない）
+        if (len < size - 1) {
+            buf[len++] = (char) ch;
+            putchar((char) ch);
+        }
+    }
+
+    buf[len] = '\0';
+    return len;
+}
+
+/**
+ * @brief 疑似コンソール本体
+ * @param pid 自プロセスのID（プロンプトの表示に使う）
+ *
+ * exit が入力されたら戻る。呼び出し元の main が return すると
+ * start() が exit() を呼び、プロセスが終了する。
+ */
+static void run_console(int pid) {
+    char line[CONSOLE_BUF_SIZE];
+
+    printf("\nconsole (pid %d) ready. type 'help' for commands.\n", pid);
+
+    for (;;) {
+        printf("> ");
+        readline(line, CONSOLE_BUF_SIZE);
+
+        if (line[0] == '\0') {
+            continue;   // 空行はプロンプトを出し直すだけ
+        }
+
+        if (str_eq(line, "help")) {
+            printf("  help   show this help\n");
+            printf("  hello  print a greeting\n");
+            printf("  pid    show this process id\n");
+            printf("  exit   terminate the console\n");
+        } else if (str_eq(line, "hello")) {
+            printf("Hello from console (pid %d)\n", pid);
+        } else if (str_eq(line, "pid")) {
+            printf("%d\n", pid);
+        } else if (str_eq(line, "exit")) {
+            printf("bye\n");
+            return;
+        } else {
+            printf("unknown command: %s\n", line);
+        }
+    }
+}
+
+/**
+ * @brief 一定間隔で出力し続けるプロセス
+ *
+ * プリエンプションとスケジューリングが効いていることを目視で確認するための
+ * プロセス。コンソールが入力待ちでも独立して動き続ける。
+ */
+static void run_printer(void) {
+    int tick = 0;
+
+    for (;;) {
+        printf("[printer] tick %d\n", ++tick);
+        sleep(PRINTER_INTERVAL_SEC);
+    }
 }
 
 void main(void) {
     int pid = getpid();
 
-    // 2つのプロセスが同じイメージを実行するため、開始タイミングをずらして
-    // 出力が重なりにくいようにする。printf は1文字ごとのシステムコールで
-    // 途中でプリエンプションされうるため、これは重なる確率を下げるだけで
-    // あり、排他制御ではない。しかも2プロセスの周期にはわずかな差があり
-    // （実測で約0.2ms/回）、ずらした500msは数十分かけて縮んでいく
-    sleep_ms((pid % 2) * 500);
-
-    for (;;) {
-        printf("[pid %d] Hello World\n", pid);
-        sleep(1);
+    // 同じイメージから2つのプロセスが起動するので、PID で役割を分ける
+    if (pid == CONSOLE_PID) {
+        run_console(pid);
+        return;   // main から戻ると start() が exit() を呼ぶ
     }
+
+    run_printer();
 }
 
 __attribute__((section(".text.start")))

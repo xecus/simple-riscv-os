@@ -8,6 +8,7 @@
 #define SYS_GETCHAR 2
 #define SYS_SLEEP   3
 #define SYS_GETPID  4
+#define SYS_EXIT    5
 
 // Core system functions
 __attribute__((noreturn)) void exit(void);
@@ -21,3 +22,6 @@ void sleep(int seconds);
 
 // 自プロセスのIDを取得する
 int getpid(void);
+
+// コンソールから1行読み取る。読み取った文字数を返す
+int readline(char *buf, int size);

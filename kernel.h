@@ -53,6 +53,7 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
 #define SYS_GETCHAR 2                  // 文字入力システムコール
 #define SYS_SLEEP   3                  // 指定ミリ秒だけ待機するシステムコール
 #define SYS_GETPID  4                  // 自プロセスのIDを取得するシステムコール
+#define SYS_EXIT    5                  // 呼び出し元プロセスを終了するシステムコール
 
 // RISC-V ページフォルト例外コード
 #define SCAUSE_INST_PAGE_FAULT  12     // 命令フェッチ時のページフォルト
@@ -79,6 +80,10 @@ typedef uint32_t vaddr_t;              // 仮想アドレス型
 // SBI Timer 拡張（経過時間の通知に使う）
 #define SBI_EID_TIME        0x54494D45  // "TIME"
 #define SBI_FID_SET_TIMER   0
+
+// SBI Shutdown（legacy 拡張）。呼ぶと電源が切れ、QEMU は --no-reboot に
+// よってプロセスごと終了する
+#define SBI_EID_SHUTDOWN    8
 
 void user_entry(void);
 
