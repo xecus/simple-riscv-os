@@ -10,8 +10,10 @@ set -eu
 ROOT=$(cd "$(dirname "$0")" && pwd)
 OUT=${OUT:-$ROOT}
 USER_MAIN=${USER_MAIN:-user.c}
-CC=${CC:-clang}
-OBJCOPY=${OBJCOPY:-llvm-objcopy}
+# 一般的な CC / OBJCOPY は読まない。CC=gcc などが設定された環境で
+# RISC-V 向けでないツールが選ばれてしまうため。差し替えるときは専用の名前で指定する
+CLANG=${CLANG:-clang}
+LLVM_OBJCOPY=${LLVM_OBJCOPY:-llvm-objcopy}
 
 # -mcmodel=medany: アドレスを PC 相対で作る。既定の medlow は lui で絶対番地を
 # 作るため、0x80000000 以上のアドレス（カーネルの配置先）が符号拡張されて
@@ -22,15 +24,15 @@ CFLAGS="-std=c11 -O2 -g3 -Wall -Wextra --target=riscv64-unknown-elf -mcmodel=med
 mkdir -p "$OUT"
 
 # ユーザープログラムをビルドし、カーネルに埋め込めるオブジェクトへ変換
-$CC $CFLAGS -Wl,-T"$ROOT/user.ld" -Wl,-Map="$OUT/shell.map" -o "$OUT/shell.elf" \
+$CLANG $CFLAGS -Wl,-T"$ROOT/user.ld" -Wl,-Map="$OUT/shell.map" -o "$OUT/shell.elf" \
     "$ROOT/usys.c" "$ROOT/ulib.c" "$ROOT/$USER_MAIN"
-$OBJCOPY --set-section-flags .bss=alloc,contents -O binary "$OUT/shell.elf" "$OUT/shell.bin"
+$LLVM_OBJCOPY --set-section-flags .bss=alloc,contents -O binary "$OUT/shell.elf" "$OUT/shell.bin"
 
 # -Ibinary が作るシンボル名（_binary_shell_bin_start など）は入力ファイルの
 # パスから決まる。カーネルが参照する名前に揃えるため、出力先で実行する
-(cd "$OUT" && $OBJCOPY -Ibinary -Oelf64-littleriscv shell.bin shell.bin.o)
+(cd "$OUT" && $LLVM_OBJCOPY -Ibinary -Oelf64-littleriscv shell.bin shell.bin.o)
 
 # カーネルをビルド
-$CC $CFLAGS -Wl,-T"$ROOT/kernel.ld" -Wl,-Map="$OUT/kernel.map" -o "$OUT/kernel.elf" \
+$CLANG $CFLAGS -Wl,-T"$ROOT/kernel.ld" -Wl,-Map="$OUT/kernel.map" -o "$OUT/kernel.elf" \
     "$ROOT/kernel.c" "$ROOT/common.c" "$ROOT/sbi.c" "$ROOT/exception.c" \
     "$ROOT/memory.c" "$ROOT/process.c" "$OUT/shell.bin.o"

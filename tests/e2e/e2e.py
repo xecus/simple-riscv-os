@@ -230,6 +230,12 @@ def main():
             failed += 1
             print("[FAIL] e2e/%s: %s" % (name, e), flush=True)
             continue
+        except Exception as e:
+            # QEMU が落ちた後の書き込み（BrokenPipeError）や起動失敗なども
+            # そのシナリオの失敗として数え、残りのシナリオは続けて実行する
+            failed += 1
+            print("[FAIL] e2e/%s: %s: %s" % (name, type(e).__name__, e), flush=True)
+            continue
         print("[ OK ] e2e/%s (%.1fs)" % (name, time.monotonic() - started), flush=True)
 
     if failed:
