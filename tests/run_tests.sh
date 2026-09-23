@@ -23,7 +23,7 @@ run_unit_image() {
     echo "[BUILD] unit/$name"
     # コンパイルフラグは build.sh と揃えること
     if ! $CLANG -std=c11 -O2 -g3 -Wall -Wextra --target=riscv64-unknown-elf -mcmodel=medany -fno-stack-protector \
-            -ffreestanding -nostdlib -I"$ROOT" -I"$ROOT/tests/unit" \
+            -ffreestanding -nostdlib -I"$ROOT" -I"$ROOT/platform/qemu-virt" -I"$ROOT/tests/unit" \
             -Wl,-T"$ROOT/tests/unit/test.ld" -o "$elf" \
             "$ROOT/tests/unit/harness.c" "$ROOT/sbi.c" "$@"; then
         echo "[FAIL] unit/$name: build failed"

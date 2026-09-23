@@ -408,7 +408,7 @@ void kernel_main(void) {
     // BSS領域をゼロで初期化（C言語の仕様により必要）
     memset(__bss, 0, (size_t)__bss_end - (size_t)__bss);
 
-    printf("RISC-V OS Starting...\n");
+    printf("RISC-V OS Starting... (platform: %s)\n", PLATFORM_NAME);
 
     // トラップベクタ設定：例外・割り込み時にkernel_entry関数を呼び出し
     WRITE_CSR(stvec, (uintptr_t) kernel_entry);

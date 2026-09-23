@@ -5,11 +5,19 @@
 #   OUT        成果物の出力先ディレクトリ（既定: リポジトリ直下）
 #   USER_MAIN  ユーザープログラムの main を含むソース（既定: user.c）
 #              テストでは専用のユーザープログラムに差し替える
+#   PLATFORM   対象のプラットフォーム（既定: qemu-virt）
+#              platform/ 以下のディレクトリ名を指定する（例: milkv-duo）
 set -eu
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
 OUT=${OUT:-$ROOT}
 USER_MAIN=${USER_MAIN:-user.c}
+PLATFORM=${PLATFORM:-qemu-virt}
+PLATFORM_DIR="$ROOT/platform/$PLATFORM"
+if [ ! -f "$PLATFORM_DIR/platform.h" ] || [ ! -f "$PLATFORM_DIR/platform.ld" ]; then
+    echo "build.sh: unknown PLATFORM '$PLATFORM' (see $ROOT/platform/)" >&2
+    exit 1
+fi
 # 一般的な CC / OBJCOPY は読まない。CC=gcc などが設定された環境で
 # RISC-V 向けでないツールが選ばれてしまうため。差し替えるときは専用の名前で指定する
 CLANG=${CLANG:-clang}
@@ -19,7 +27,8 @@ LLVM_OBJCOPY=${LLVM_OBJCOPY:-llvm-objcopy}
 # 作るため、0x80000000 以上のアドレス（カーネルの配置先）が符号拡張されて
 # 0xffffffff80000000 のような値になってしまう。
 # tests/run_tests.sh と run.ps1 のフラグもこれと揃えること
-CFLAGS="-std=c11 -O2 -g3 -Wall -Wextra --target=riscv64-unknown-elf -mcmodel=medany -fno-stack-protector -ffreestanding -nostdlib -I$ROOT"
+# -I$PLATFORM_DIR: kernel.h が読む platform.h をプラットフォームごとに切り替える
+CFLAGS="-std=c11 -O2 -g3 -Wall -Wextra --target=riscv64-unknown-elf -mcmodel=medany -fno-stack-protector -ffreestanding -nostdlib -I$ROOT -I$PLATFORM_DIR"
 
 mkdir -p "$OUT"
 
@@ -32,7 +41,7 @@ $LLVM_OBJCOPY --set-section-flags .bss=alloc,contents -O binary "$OUT/shell.elf"
 # パスから決まる。カーネルが参照する名前に揃えるため、出力先で実行する
 (cd "$OUT" && $LLVM_OBJCOPY -Ibinary -Oelf64-littleriscv shell.bin shell.bin.o)
 
-# カーネルをビルド
-$CLANG $CFLAGS -Wl,-T"$ROOT/kernel.ld" -Wl,-Map="$OUT/kernel.map" -o "$OUT/kernel.elf" \
+# カーネルをビルド。-L は kernel.ld の INCLUDE platform.ld の検索先
+$CLANG $CFLAGS -Wl,-L"$PLATFORM_DIR" -Wl,-T"$ROOT/kernel.ld" -Wl,-Map="$OUT/kernel.map" -o "$OUT/kernel.elf" \
     "$ROOT/kernel.c" "$ROOT/common.c" "$ROOT/sbi.c" "$ROOT/exception.c" \
     "$ROOT/memory.c" "$ROOT/process.c" "$OUT/shell.bin.o"

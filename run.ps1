@@ -10,6 +10,13 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
+# QEMU で実行するので、QEMU 以外向けのビルドは受け付けない
+# （build.sh の PLATFORM に相当。実機向けは WSL で build.sh を使うこと）
+if ($env:PLATFORM -and $env:PLATFORM -ne 'qemu-virt') {
+    throw "PLATFORM=$($env:PLATFORM) は QEMU で実行できません。build.sh でビルドしてください。"
+}
+$PlatformDir = 'platform/qemu-virt'
+
 # PATH上のツールを探し、見つからなければ既定のインストール先を確認する
 function Find-Tool {
     param([string]$Name, [string[]]$Fallbacks)
@@ -32,7 +39,7 @@ $CFLAGS = @(
     '-std=c11', '-O2', '-g3', '-Wall', '-Wextra',
     '--target=riscv64-unknown-elf', '-mcmodel=medany',
     '-fno-stack-protector', '-ffreestanding', '-nostdlib',
-    '-fuse-ld=lld'
+    '-fuse-ld=lld', "-I$PlatformDir"
 )
 
 # 直前のネイティブコマンドが失敗していたら中断する
@@ -52,7 +59,7 @@ Assert-Success 'shell.bin の生成'
 Assert-Success 'shell.bin.o の生成'
 
 # カーネルをビルド
-& $CC @CFLAGS '-Wl,-Tkernel.ld' '-Wl,-Map=kernel.map' -o kernel.elf `
+& $CC @CFLAGS "-Wl,-L$PlatformDir" '-Wl,-Tkernel.ld' '-Wl,-Map=kernel.map' -o kernel.elf `
     kernel.c common.c sbi.c exception.c memory.c process.c shell.bin.o
 Assert-Success 'kernel.elf のビルド'
 

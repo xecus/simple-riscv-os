@@ -30,7 +30,8 @@ def qemu_command(kernel):
 
 def build(name, user_main):
     out = os.path.join(BUILD, name)
-    env = dict(os.environ, OUT=out, USER_MAIN=user_main)
+    # QEMU で動かすので、呼び出し元の環境変数に関わらず qemu-virt 向けにビルドする
+    env = dict(os.environ, OUT=out, USER_MAIN=user_main, PLATFORM="qemu-virt")
     result = subprocess.run(["bash", os.path.join(ROOT, "build.sh")], env=env)
     if result.returncode != 0:
         raise Failure("build failed (USER_MAIN=%s)" % user_main)

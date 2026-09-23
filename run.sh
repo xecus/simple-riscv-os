@@ -3,6 +3,15 @@ set -eu
 
 cd "$(dirname "$0")"
 
+# このスクリプトは QEMU で実行するので、QEMU 以外向けのビルドは受け付けない。
+# 実機向けは PLATFORM=milkv-duo ./build.sh のようにビルドだけ行うこと
+PLATFORM=${PLATFORM:-qemu-virt}
+if [ "$PLATFORM" != qemu-virt ]; then
+    echo "run.sh: PLATFORM=$PLATFORM cannot run on QEMU; use build.sh instead" >&2
+    exit 1
+fi
+export PLATFORM
+
 # カーネルとユーザープログラムをビルド
 ./build.sh
 
