@@ -6,9 +6,6 @@
 # Linker map files
 *.map
 
-# OpenSBI binary (can be downloaded separately)
-opensbi-riscv32-generic-fw_dynamic.bin
-
 # Temporary files
 *~
 *.tmp
