@@ -200,6 +200,9 @@ struct process *create_process2(const void *image, size_t image_size,
                  PAGE_U | PAGE_R | PAGE_W | PAGE_X);
     }
 
+    // コピーしたイメージには命令が含まれる。実行前に命令キャッシュへ反映する
+    sync_icache();
+
     return proc;
 }
 

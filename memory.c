@@ -37,7 +37,7 @@ static uintptr_t pt_index(vaddr_t vaddr, int level) {
  * に分割される。ルートから段を下りながら、無い中間テーブルを作り、
  * 最下段にリーフを書く。
  */
-void map_page(pte_t *root, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
+void map_page(pte_t *root, vaddr_t vaddr, paddr_t paddr, pte_t flags) {
     if (!is_aligned(vaddr, PAGE_SIZE))
         PANIC("unaligned vaddr %lx", vaddr);
 
@@ -59,11 +59,14 @@ void map_page(pte_t *root, vaddr_t vaddr, paddr_t paddr, uint32_t flags) {
             paddr_t pt_paddr = alloc_pages(1);
             *entry = ((pt_paddr / PAGE_SIZE) << PTE_PPN_SHIFT) | PAGE_V;
         }
-        table = (pte_t *) ((*entry >> PTE_PPN_SHIFT) * PAGE_SIZE);
+        table = (pte_t *) pte_to_paddr(*entry);
     }
 
     // 最下段のテーブルにリーフエントリを書く。
-    // A/D ビットはハードウェアが自動更新しない実装もあるため、あらかじめ立てておく
-    table[pt_index(vaddr, 0)] =
-        ((paddr / PAGE_SIZE) << PTE_PPN_SHIFT) | flags | PAGE_A | PAGE_D | PAGE_V;
+    // A/D ビットはハードウェアが自動更新しない実装もあるため、あらかじめ立てておく。
+    // PTE_ATTR_NORMAL_MEM はプラットフォーム固有のメモリ属性（platform.h）。
+    // このOSがマップするのは全て通常のメモリ（DRAM）なので常に付ける。
+    // 中間エントリには付けない（標準の RISC-V では非リーフの上位ビットは予約）
+    table[pt_index(vaddr, 0)] = ((paddr / PAGE_SIZE) << PTE_PPN_SHIFT) | flags
+                                | PAGE_A | PAGE_D | PAGE_V | PTE_ATTR_NORMAL_MEM;
 }

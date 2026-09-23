@@ -1,0 +1,4 @@
+# QEMU の追加オプション。書式は platform/qemu-virt/qemu.args を参照。
+# Milk-V Duo の CPU（T-Head C906）と DRAM 容量（64MB）に揃える
+-cpu thead-c906
+-m 64M

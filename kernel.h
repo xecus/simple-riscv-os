@@ -13,6 +13,10 @@
  */
 #pragma once
 
+// プラットフォーム（QEMU virt、Milk-V Duo など）ごとに異なる定数。
+// build.sh の PLATFORM に応じて platform/<名前>/platform.h が読まれる
+#include "platform.h"
+
 // 基本的な型定義
 typedef unsigned int uint32_t;         // 32ビット符号なし整数
 typedef unsigned long size_t;          // サイズを表す型
@@ -78,10 +82,8 @@ typedef uintptr_t vaddr_t;             // 仮想アドレス型
 #define PROCESS_STACK_SIZE  (8 * 1024)    // 8KB
 
 // タイマ関連定数
-// QEMU virt マシンの mtimer は 10MHz で動作する（OpenSBI の起動ログに
-// "Platform Timer Device : aclint-mtimer @ 10000000Hz" として出る）。
-// time CSR はこの周波数でカウントアップするので、経過時間の測定に使える。
-#define TIMER_FREQ_HZ   10000000u         // タイマ周波数（10MHz）
+// time CSR は TIMER_FREQ_HZ（platform.h で定義）の周波数でカウントアップ
+// するので、経過時間の測定に使える
 #define TICKS_PER_MS    (TIMER_FREQ_HZ / 1000)  // 1ミリ秒あたりのカウント数
 
 // タイムスライスの長さ。この間隔でタイマ割り込みが発生し、

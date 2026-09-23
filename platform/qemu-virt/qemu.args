@@ -1,0 +1,7 @@
+# QEMU の追加オプション（run.sh、run.ps1、tests/e2e/e2e.py が読む）。
+# 空白区切りで書く。# で始まる行は無視する。
+# このファイルがあるプラットフォームだけが QEMU で実行できる。
+# -machine virt、-bios default、-kernel などの共通部分は各スクリプトが付ける
+
+# platform.ld の RAM_END（128MB）と揃える。QEMU virt の既定値と同じ
+-m 128M
