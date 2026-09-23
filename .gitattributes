@@ -5,3 +5,6 @@
 
 # PowerShellスクリプトはWindows流儀のCRLFで揃える
 *.ps1 text eol=crlf
+
+# Python スクリプトもシェバン行を持つので LF で揃える
+*.py text eol=lf
